@@ -5,7 +5,13 @@ from pathlib import Path
 
 # Base paths
 BASE_DIR = Path(__file__).parent
-NOTES_DIR = BASE_DIR / "notes"
+
+# Notes directory on Desktop (or user home if Desktop doesn't exist)
+DESKTOP_DIR = Path.home() / "Desktop"
+if DESKTOP_DIR.exists():
+    NOTES_DIR = DESKTOP_DIR / "Fieldream"
+else:
+    NOTES_DIR = Path.home() / "Fieldream"
 
 # Ensure notes directory exists
 NOTES_DIR.mkdir(exist_ok=True)

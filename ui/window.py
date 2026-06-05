@@ -97,12 +97,14 @@ class WindowManager:
         """
         return self.stdscr.getch()
 
-    def draw_dashboard(self, session_name: str, reams: List[Dict]) -> None:
+    def draw_dashboard(self, session_name: str, reams: List[Dict], input_text: str = "", active_ream: str = None) -> None:
         """Draw the ream dashboard showing status of each ream.
         
         Args:
             session_name: Current session name
             reams: List of ream dictionaries with status
+            input_text: Current input text if a ream is active
+            active_ream: Key of the currently active ream
         """
         self.clear_content()
         content_win = self.get_content_area()
@@ -124,5 +126,13 @@ class WindowManager:
             content_win.addstr(row, 2, line, color_pair)
             content_win.addstr(row + 1, 4, ream['description'])
             row += 3
+        
+        # Draw input area at bottom if a ream is active
+        if active_ream:
+            row += 2
+            if row < self.height - 4:
+                content_win.addstr(row, 2, f"[{active_ream.upper()}] Entry:", curses.A_BOLD)
+                row += 1
+                content_win.addstr(row, 2, "> " + input_text, curses.color_pair(3))
         
         content_win.refresh()
