@@ -44,7 +44,18 @@ class Fieldream:
         """
         try:
             startup = StartupScreen(self.stdscr, NOTES_DIR)
-            self.session_folder, self.session_name = startup.prompt_session_name()
+            result = startup.prompt_session_name()
+            
+            if result is None or len(result) != 2:
+                self.status_message = "Session creation failed"
+                return False
+            
+            self.session_folder, self.session_name = result
+            
+            if not self.session_folder or not self.session_name:
+                self.status_message = "Invalid session folder or name"
+                return False
+            
             self.file_handler = FileHandler(NOTES_DIR, self.session_folder)
             
             # Initialize reams with the session file handler
@@ -102,13 +113,17 @@ class Fieldream:
 
     def save_active_entry(self) -> None:
         """Save the current input as an entry in the active ream."""
-        if self.active_ream and self.input_text.strip():
-            ream = self.reams[self.active_ream]
-            filepath = ream.append_note(self.input_text)
-            self.status_message = f"✓ Saved to {filepath.name}"
+        if self.active_ream:
+            text_to_save = self.input_text.strip()
+            if text_to_save:
+                ream = self.reams[self.active_ream]
+                filepath = ream.append_note(text_to_save)
+                self.status_message = f"✓ Saved: {len(text_to_save)} chars"
+            else:
+                self.status_message = "Entry empty - nothing saved"
+            
+            # Always clear the input field after Enter
             self.input_text = ""
-        elif self.active_ream:
-            self.status_message = "Nothing to save (empty entry)"
 
     def draw_dashboard(self) -> None:
         """Draw the dashboard view."""
@@ -131,6 +146,7 @@ class Fieldream:
 
     def run(self) -> None:
         """Main application loop."""
+        import time
         curses.curs_set(0)  # Hide cursor by default
         
         # Initialize session
@@ -142,6 +158,9 @@ class Fieldream:
         
         while self.running:
             try:
+                # Add small delay to prevent rapid flashing
+                time.sleep(0.05)
+                
                 self.draw_dashboard()
                 
                 ch = self.stdscr.getch()
@@ -176,10 +195,10 @@ class Fieldream:
                         self.running = False
                 
             except Exception as e:
-                self.status_message = f"Error: {str(e)}"
+                self.status_message = f"Error: {str(e)[:40]}"
                 self.window_manager.draw_status(self.status_message)
                 self.window_manager.refresh_all()
-                self.stdscr.getch()
+                time.sleep(0.1)
 
 
 def main(stdscr):
