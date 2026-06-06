@@ -187,6 +187,12 @@ class InterviewRea(BaseRea):
             self.error_message = "Model not loaded"
             return
         
+        try:
+            import numpy as np
+        except ImportError:
+            self.error_message = "Missing: numpy"
+            return
+        
         while self.is_recording or not self.audio_queue.empty():
             try:
                 # Get audio chunk with timeout
@@ -195,26 +201,41 @@ class InterviewRea(BaseRea):
                 continue
             
             try:
-                # Debug: show chunk info
-                import numpy as np
+                # Ensure proper format
+                audio_chunk = np.asarray(audio_chunk, dtype=np.float32)
+                
+                # Calculate RMS for debugging
                 chunk_rms = np.sqrt(np.mean(audio_chunk ** 2))
+                
+                # Normalize audio if too quiet
+                if chunk_rms < 0.01:
+                    self.last_transcription = f"[too quiet] {chunk_rms:.4f}"
+                    continue
+                
+                # Normalize to prevent clipping
+                if chunk_rms > 0:
+                    audio_chunk = audio_chunk / (chunk_rms * 5)  # Normalize to prevent peaks
+                
+                # Ensure audio is in the right shape for Whisper
+                if audio_chunk.ndim == 1:
+                    audio_chunk = audio_chunk.reshape(-1)
                 
                 # Transcribe audio chunk
                 segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
                 
                 text_found = False
-                for segment in segments:
-                    text = segment.text.strip()
-                    if text and len(text) > 0:
-                        # Save to file
-                        self.save_entry(text)
-                        self.last_transcription = text
-                        text_found = True
-                        break
+                if segments:
+                    for segment in segments:
+                        text = segment.text.strip()
+                        if text and len(text) > 1:  # Filter very short segments
+                            # Save to file
+                            self.save_entry(text)
+                            self.last_transcription = text
+                            text_found = True
+                            break
                 
                 if not text_found:
-                    # Show RMS to debug
-                    self.last_transcription = f"[silence] {chunk_rms:.3f}"
+                    self.last_transcription = f"[no speech] RMS:{chunk_rms:.3f}"
                     
             except Exception as e:
-                self.error_message = f"Transcribe: {str(e)[:20]}"
+                self.error_message = f"Transcribe: {str(e)[:30]}"
