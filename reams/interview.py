@@ -189,8 +189,11 @@ class InterviewRea(BaseRea):
         
         try:
             import numpy as np
-        except ImportError:
-            self.error_message = "Missing: numpy"
+            import soundfile as sf
+            import tempfile
+            import os
+        except ImportError as e:
+            self.error_message = f"Missing: {str(e)[:20]}"
             return
         
         while self.is_recording or not self.audio_queue.empty():
@@ -207,35 +210,39 @@ class InterviewRea(BaseRea):
                 # Calculate RMS for debugging
                 chunk_rms = np.sqrt(np.mean(audio_chunk ** 2))
                 
-                # Normalize audio if too quiet
+                # Skip if too quiet
                 if chunk_rms < 0.01:
-                    self.last_transcription = f"[too quiet] {chunk_rms:.4f}"
+                    self.last_transcription = f"[too quiet]"
                     continue
                 
-                # Normalize to prevent clipping
-                if chunk_rms > 0:
-                    audio_chunk = audio_chunk / (chunk_rms * 5)  # Normalize to prevent peaks
+                # Write to temporary WAV file
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    tmp_path = tmp.name
                 
-                # Ensure audio is in the right shape for Whisper
-                if audio_chunk.ndim == 1:
-                    audio_chunk = audio_chunk.reshape(-1)
-                
-                # Transcribe audio chunk
-                segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
-                
-                text_found = False
-                if segments:
-                    for segment in segments:
-                        text = segment.text.strip()
-                        if text and len(text) > 1:  # Filter very short segments
-                            # Save to file
-                            self.save_entry(text)
-                            self.last_transcription = text
-                            text_found = True
-                            break
-                
-                if not text_found:
-                    self.last_transcription = f"[no speech] RMS:{chunk_rms:.3f}"
+                try:
+                    # Write audio to WAV file at 16kHz
+                    sf.write(tmp_path, audio_chunk, 16000)
+                    
+                    # Transcribe from file
+                    segments, info = self.whisper_model.transcribe(tmp_path, language="en")
+                    
+                    text_found = False
+                    if segments:
+                        for segment in segments:
+                            text = segment.text.strip()
+                            if text and len(text) > 1:
+                                # Save to file
+                                self.save_entry(text)
+                                self.last_transcription = text
+                                text_found = True
+                                break
+                    
+                    if not text_found:
+                        self.last_transcription = f"[no speech]"
+                finally:
+                    # Clean up temp file
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
                     
             except Exception as e:
-                self.error_message = f"Transcribe: {str(e)[:30]}"
+                self.error_message = f"Error: {str(e)[:25]}"
