@@ -230,9 +230,11 @@ class Fieldream:
             else:
                 volume = ream.get_current_volume()
                 meter = self.render_volume_meter(volume)
-                # Show device info if available
-                suffix = f" {ream.device_info}" if ream.device_info else ""
-                status_msg = f"Recording... {meter}{suffix}"
+                # Show last transcribed text if available
+                if ream.last_transcription:
+                    status_msg = f"Recording... {meter} | {ream.last_transcription[:40]}"
+                else:
+                    status_msg = f"Recording... {meter}"
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(status_msg)

@@ -1,4 +1,4 @@
-"""Interview ream - Audio capture and volume monitoring (transcription coming next)."""
+"""Interview ream - Audio capture and speech-to-text transcription."""
 
 import threading
 import queue
@@ -8,7 +8,7 @@ from utils.file_handler import FileHandler
 
 
 class InterviewRea(BaseRea):
-    """Interview ream for audio capture and monitoring."""
+    """Interview ream for audio capture and transcription."""
     
     def __init__(self, file_handler: FileHandler):
         """Initialize interview ream.
@@ -19,11 +19,14 @@ class InterviewRea(BaseRea):
         super().__init__(file_handler, "interview", "Interview")
         self.is_recording = False
         self.audio_thread = None
+        self.transcription_thread = None
         self.current_volume = 0  # RMS level (0-1)
-        self.audio_enabled = False
         self.error_message = ""
         self.device_info = ""
-        self.selected_device = None  # Will be set in start_session()
+        self.selected_device = None
+        self.audio_queue = queue.Queue()
+        self.whisper_model = None
+        self.last_transcription = ""
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -32,6 +35,7 @@ class InterviewRea(BaseRea):
         self.current_volume = 0
         self.error_message = ""
         self.device_info = ""
+        self.last_transcription = ""
         
         try:
             import sounddevice as sd
@@ -76,8 +80,6 @@ class InterviewRea(BaseRea):
                 dev_name = 'Default'
             
             self.device_info = f"Dev:{usb_device_id}({dev_name})"
-            
-            # Store device ID for use in audio thread
             self.selected_device = usb_device_id
             
         except Exception as e:
@@ -85,9 +87,25 @@ class InterviewRea(BaseRea):
             self.is_recording = False
             return
         
-        # Start audio capture thread
+        # Load Whisper model
+        try:
+            from faster_whisper import WhisperModel
+            self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        except ImportError:
+            self.error_message = "Missing: faster-whisper"
+            self.is_recording = False
+            return
+        except Exception as e:
+            self.error_message = f"Model error: {str(e)[:20]}"
+            self.is_recording = False
+            return
+        
+        # Start audio and transcription threads
         self.audio_thread = threading.Thread(target=self._audio_capture_worker, daemon=True)
         self.audio_thread.start()
+        
+        self.transcription_thread = threading.Thread(target=self._transcription_worker, daemon=True)
+        self.transcription_thread.start()
     
     def end_session(self) -> None:
         """End the current interview session."""
@@ -119,7 +137,7 @@ class InterviewRea(BaseRea):
         return self.current_volume
     
     def _audio_capture_worker(self) -> None:
-        """Background thread: capture audio and measure volume."""
+        """Background thread: capture audio and queue for transcription."""
         try:
             import sounddevice as sd
             import numpy as np
@@ -128,7 +146,6 @@ class InterviewRea(BaseRea):
             self.is_recording = False
             return
         
-        # Use the device selected in start_session()
         device_id = self.selected_device
         if device_id is None:
             self.error_message = "No audio device selected"
@@ -136,23 +153,24 @@ class InterviewRea(BaseRea):
             return
         
         sample_rate = 16000
-        chunk_duration = 0.5
+        chunk_duration = 1  # 1-second chunks for transcription
         chunk_size = int(sample_rate * chunk_duration)
         
         try:
-            # Create and start stream
             stream = sd.InputStream(device=device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32')
             stream.start()
             
             while self.is_recording:
                 try:
-                    # Read audio chunk from the stream
                     audio_chunk, _ = stream.read(frames=chunk_size)
                     
                     if len(audio_chunk) > 0:
-                        # Calculate RMS (volume level)
+                        # Calculate RMS for volume meter
                         rms = np.sqrt(np.mean(audio_chunk ** 2))
                         self.current_volume = float(rms)
+                        
+                        # Queue audio for transcription
+                        self.audio_queue.put(audio_chunk)
                 except:
                     pass
             
@@ -160,3 +178,28 @@ class InterviewRea(BaseRea):
             stream.close()
         except Exception as e:
             self.error_message = f"Audio: {str(e)[:20]}"
+    
+    def _transcription_worker(self) -> None:
+        """Background thread: transcribe audio chunks."""
+        if self.whisper_model is None:
+            return
+        
+        while self.is_recording or not self.audio_queue.empty():
+            try:
+                # Get audio chunk with timeout
+                audio_chunk = self.audio_queue.get(timeout=1)
+            except queue.Empty:
+                continue
+            
+            try:
+                # Transcribe audio chunk
+                segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
+                
+                for segment in segments:
+                    text = segment.text.strip()
+                    if text:
+                        # Save to file
+                        self.save_entry(text)
+                        self.last_transcription = text
+            except Exception as e:
+                self.error_message = f"Transcribe: {str(e)[:20]}"
