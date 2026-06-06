@@ -97,7 +97,6 @@ class WindowManager:
             # Draw 3 columns
             col_width = (self.width - 4) // 3
             row = 3
-            display_height = col_width // 2 - 1  # Rows available for content in each column
             
             for col_idx, ream in enumerate(reams):
                 if col_idx >= 3:
@@ -151,25 +150,26 @@ class WindowManager:
                 
                 # Display wrapped content lines
                 display_row = 0
+                max_content_row = self.height - 6  # Stop before input area
                 for i in range(offset, len(wrapped_lines)):
-                    if display_row >= display_height:
-                        break
-                    if row + 1 + display_row >= self.height - 3:
+                    if row + 1 + display_row >= max_content_row:
                         break
                     
                     display_line = wrapped_lines[i]
                     self.stdscr.addstr(row + 1 + display_row, col_x, display_line[:col_width])
                     display_row += 1
                 
-                # Display input lines if active
+                # Display input lines if active (fixed position near bottom)
                 if is_active:
+                    input_start_row = self.height - 5  # 2 rows above status line
+                    display_row = 0
                     for input_line in input_display_lines:
-                        if display_row >= display_height:
+                        if display_row >= 2:  # Max 2 lines for input
                             break
-                        if row + 1 + display_row >= self.height - 3:
+                        if input_start_row + display_row >= self.height - 2:
                             break
                         
-                        self.stdscr.addstr(row + 1 + display_row, col_x, input_line[:col_width], curses.color_pair(3))
+                        self.stdscr.addstr(input_start_row + display_row, col_x, input_line[:col_width], curses.color_pair(3))
                         display_row += 1
             
             self.stdscr.refresh()
