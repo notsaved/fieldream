@@ -155,7 +155,7 @@ class InterviewRea(BaseRea):
             return
         
         sample_rate = 16000
-        chunk_duration = 1  # 1-second chunks for transcription
+        chunk_duration = 3  # 3-second chunks for better Whisper detection
         chunk_size = int(sample_rate * chunk_duration)
         
         try:
@@ -190,25 +190,31 @@ class InterviewRea(BaseRea):
         while self.is_recording or not self.audio_queue.empty():
             try:
                 # Get audio chunk with timeout
-                audio_chunk = self.audio_queue.get(timeout=1)
+                audio_chunk = self.audio_queue.get(timeout=2)
             except queue.Empty:
                 continue
             
             try:
+                # Debug: show chunk info
+                import numpy as np
+                chunk_rms = np.sqrt(np.mean(audio_chunk ** 2))
+                
                 # Transcribe audio chunk
                 segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
                 
                 text_found = False
                 for segment in segments:
                     text = segment.text.strip()
-                    if text:
+                    if text and len(text) > 0:
                         # Save to file
                         self.save_entry(text)
                         self.last_transcription = text
                         text_found = True
+                        break
                 
                 if not text_found:
-                    self.last_transcription = "[silence]"
+                    # Show RMS to debug
+                    self.last_transcription = f"[silence] {chunk_rms:.3f}"
                     
             except Exception as e:
-                self.error_message = f"Transcribe error: {str(e)[:25]}"
+                self.error_message = f"Transcribe: {str(e)[:20]}"
