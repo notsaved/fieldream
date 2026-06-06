@@ -149,6 +149,17 @@ class Fieldream:
             else:
                 self.status_message = f"{ream_key} ream not yet implemented"
 
+    def count_words(self, text: str) -> int:
+        """Count words in text.
+        
+        Args:
+            text: Text to count words in
+            
+        Returns:
+            Number of words
+        """
+        return len(text.split())
+    
     def save_active_entry(self) -> None:
         """Save the current input as an entry in the active ream."""
         if self.active_ream:
@@ -161,7 +172,9 @@ class Fieldream:
             if text_to_save:
                 ream = self.reams[self.active_ream]
                 filepath = ream.append_note(text_to_save)
-                self.status_message = f"✓ Saved: {len(text_to_save)} chars"
+                char_count = len(text_to_save)
+                word_count = self.count_words(text_to_save)
+                self.status_message = f"✓ Saved: {char_count}/{word_count}"
             else:
                 self.status_message = "Entry empty - nothing saved"
             
@@ -215,10 +228,12 @@ class Fieldream:
                 
                 if ch == -1:
                     # No input available
+                    # Update status with live count if observation is active
+                    if self.active_ream == "observation" and self.input_text:
+                        char_count = len(self.input_text)
+                        word_count = self.count_words(self.input_text)
+                        self.status_message = f"Typing: {char_count}/{word_count}"
                     continue
-                
-                # Show key code in status
-                self.status_message = f"Key: {ch}"
                 
                 # Handle scrolling (available in any mode)
                 if ch == curses.KEY_UP:
