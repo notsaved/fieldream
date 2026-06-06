@@ -82,11 +82,11 @@ class InterviewRea(BaseRea):
             return
         
         # List available devices and find USB device
+        usb_device_id = None
         try:
             devices = sd.query_devices()
-            usb_device_id = None
             
-            # Look for USB device (contains 'USB' in name)
+            # Log device info for debugging
             if isinstance(devices, list):
                 for idx, device in enumerate(devices):
                     if isinstance(device, dict) and 'name' in device:
@@ -97,6 +97,8 @@ class InterviewRea(BaseRea):
             # If no explicit USB device, try default input
             if usb_device_id is None:
                 usb_device_id = sd.default.device[0]  # Use default input device
+            
+            self.error_message = f"Using device: {usb_device_id}"
         except Exception as e:
             self.error_message = f"Device: {str(e)[:25]}"
             self.is_recording = False
@@ -107,14 +109,23 @@ class InterviewRea(BaseRea):
         chunk_size = int(sample_rate * chunk_duration)
         
         try:
-            with sd.InputStream(device=usb_device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32'):
-                while self.is_recording:
-                    # Read audio chunk
-                    audio_chunk, _ = sd.read(frames=chunk_size, dtype='float32')
+            # Create stream and use it properly
+            stream = sd.InputStream(device=usb_device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32')
+            stream.start()
+            
+            while self.is_recording:
+                try:
+                    # Read audio chunk from the stream
+                    audio_chunk, _ = stream.read(frames=chunk_size)
                     
                     if len(audio_chunk) > 0:
                         # Calculate RMS (volume level)
                         rms = np.sqrt(np.mean(audio_chunk ** 2))
                         self.current_volume = float(rms)
+                except:
+                    pass
+            
+            stream.stop()
+            stream.close()
         except Exception as e:
             self.error_message = f"Audio: {str(e)[:25]}"
