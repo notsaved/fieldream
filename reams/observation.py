@@ -15,6 +15,14 @@ class ObservationRea(BaseRea):
         """
         super().__init__(file_handler, "observation", "Observation")
 
+    def handle_input(self, input_data: str) -> None:
+        """Handle text input for observation notes.
+        
+        Args:
+            input_data: Text input from user
+        """
+        pass
+
     def append_note(self, text: str) -> None:
         """Append a note entry to the observation file.
         
