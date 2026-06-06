@@ -14,16 +14,6 @@ class ObservationRea(BaseRea):
             file_handler: FileHandler instance for file operations
         """
         super().__init__(file_handler, "observation", "Observation")
-        self.current_buffer = ""
-
-    def handle_input(self, input_data: str) -> None:
-        """Handle text input for observation notes.
-        
-        Args:
-            input_data: Text input from user
-        """
-        # In the UI, this will be called with each character or line
-        self.current_buffer += input_data
 
     def append_note(self, text: str) -> None:
         """Append a note entry to the observation file.

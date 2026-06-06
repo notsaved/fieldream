@@ -2,31 +2,19 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 class FileHandler:
     """Handles reading and writing markdown note files."""
 
-    def __init__(self, notes_dir: Path, session_folder: Optional[Path] = None):
-        """Initialize file handler with notes directory.
+    def __init__(self, notes_dir, session_folder: Path):
+        """Initialize file handler.
         
         Args:
-            notes_dir: Path to the root directory where notes are stored
-            session_folder: Path to the current session folder (if any)
-        """
-        self.notes_dir = notes_dir
-        self.notes_dir.mkdir(exist_ok=True)
-        self.session_folder = session_folder
-
-    def set_session_folder(self, session_folder: Path) -> None:
-        """Set the current session folder.
-        
-        Args:
-            session_folder: Path to the session folder
+            notes_dir: Unused (kept for compatibility)
+            session_folder: Path to the current session folder
         """
         self.session_folder = session_folder
-        self.session_folder.mkdir(parents=True, exist_ok=True)
 
     def get_session_file(self, prefix: str) -> Path:
         """Get or create today's session file for a ream.
@@ -58,21 +46,6 @@ class FileHandler:
         
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(entry)
-
-    def read_file(self, filepath: Path) -> str:
-        """Read the entire contents of a file.
-        
-        Args:
-            filepath: Path to the file to read
-            
-        Returns:
-            Contents of the file
-        """
-        if not filepath.exists():
-            return ""
-        
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
 
     def create_header(self, title: str, prefix: str) -> str:
         """Create a markdown header for a new session file.

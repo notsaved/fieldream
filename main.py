@@ -4,7 +4,7 @@ import curses
 import sys
 from pathlib import Path
 
-from config import NOTES_DIR, REAMS, BASE_DIR
+from config import REAMS, BASE_DIR
 from ui.window import WindowManager
 from ui.startup import StartupScreen
 from utils.file_handler import FileHandler

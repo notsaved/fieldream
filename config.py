@@ -32,19 +32,3 @@ REAMS = [
         "file_prefix": "snapshot",
     },
 ]
-
-# UI settings
-UI_COLORS = {
-    "default": 0,
-    "header": 1,
-    "footer": 2,
-    "highlight": 3,
-}
-
-# Status messages
-STATUS_MESSAGES = {
-    "ream_changed": "Ream changed to: {}",
-    "note_saved": "Note saved to: {}",
-    "error": "Error: {}",
-    "info": "{}",
-}
