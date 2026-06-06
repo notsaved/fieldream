@@ -97,6 +97,8 @@ class WindowManager:
             # Draw 3 columns
             col_width = (self.width - 4) // 3
             row = 3
+            max_content_row = self.height - 6  # Stop before input area (input starts at height - 5)
+            display_height = max_content_row - row  # Available rows for content
             
             for col_idx, ream in enumerate(reams):
                 if col_idx >= 3:
@@ -125,51 +127,51 @@ class WindowManager:
                         line = line[col_width:]
                     wrapped_lines.append(line)
                 
-                # Add input text as wrapped lines if active
-                input_display_lines = []
-                if is_active and input_text:
-                    input_str = "> " + input_text
-                    while len(input_str) > col_width:
-                        input_display_lines.append(input_str[:col_width])
-                        input_str = input_str[col_width:]
-                    if input_str:
-                        input_display_lines.append(input_str)
-                
-                # Total wrapped lines including input
-                total_wrapped = len(wrapped_lines) + len(input_display_lines)
-                
                 # Auto-scroll to bottom if content grew
+                total_wrapped = len(wrapped_lines)
                 if total_wrapped > display_height:
                     # Show the last display_height lines
-                    scroll_start = total_wrapped - display_height
-                    scroll_offsets[key] = scroll_start
+                    offset = total_wrapped - display_height
                 else:
-                    scroll_offsets[key] = 0
+                    offset = 0
                 
-                offset = scroll_offsets.get(key, 0)
+                scroll_offsets[key] = offset
                 
-                # Display wrapped content lines
+                # Display wrapped content lines (from row 4 onwards, up to max_content_row)
                 display_row = 0
-                max_content_row = self.height - 6  # Stop before input area
                 for i in range(offset, len(wrapped_lines)):
-                    if row + 1 + display_row >= max_content_row:
+                    current_row = row + 1 + display_row
+                    if current_row >= max_content_row:
                         break
                     
                     display_line = wrapped_lines[i]
-                    self.stdscr.addstr(row + 1 + display_row, col_x, display_line[:col_width])
+                    self.stdscr.addstr(current_row, col_x, display_line[:col_width])
                     display_row += 1
                 
                 # Display input lines if active (fixed position near bottom)
                 if is_active:
                     input_start_row = self.height - 5  # 2 rows above status line
+                    if input_text:
+                        input_str = "> " + input_text
+                    else:
+                        input_str = "> "
+                    
+                    input_display_lines = []
+                    while len(input_str) > col_width:
+                        input_display_lines.append(input_str[:col_width])
+                        input_str = input_str[col_width:]
+                    if input_str:
+                        input_display_lines.append(input_str)
+                    
                     display_row = 0
                     for input_line in input_display_lines:
                         if display_row >= 2:  # Max 2 lines for input
                             break
-                        if input_start_row + display_row >= self.height - 2:
+                        current_row = input_start_row + display_row
+                        if current_row >= self.height - 2:
                             break
                         
-                        self.stdscr.addstr(input_start_row + display_row, col_x, input_line[:col_width], curses.color_pair(3))
+                        self.stdscr.addstr(current_row, col_x, input_line[:col_width], curses.color_pair(3))
                         display_row += 1
             
             self.stdscr.refresh()
