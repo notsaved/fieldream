@@ -27,6 +27,7 @@ class InterviewRea(BaseRea):
         self.audio_queue = queue.Queue()
         self.whisper_model = None
         self.last_transcription = ""
+        self.chunks_processed = 0  # For debugging
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -91,12 +92,13 @@ class InterviewRea(BaseRea):
         try:
             from faster_whisper import WhisperModel
             self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+            self.device_info += " | Model loaded"
         except ImportError:
             self.error_message = "Missing: faster-whisper"
             self.is_recording = False
             return
         except Exception as e:
-            self.error_message = f"Model error: {str(e)[:20]}"
+            self.error_message = f"Model error: {str(e)[:25]}"
             self.is_recording = False
             return
         
@@ -182,6 +184,7 @@ class InterviewRea(BaseRea):
     def _transcription_worker(self) -> None:
         """Background thread: transcribe audio chunks."""
         if self.whisper_model is None:
+            self.error_message = "Model not loaded"
             return
         
         while self.is_recording or not self.audio_queue.empty():
@@ -195,11 +198,17 @@ class InterviewRea(BaseRea):
                 # Transcribe audio chunk
                 segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
                 
+                text_found = False
                 for segment in segments:
                     text = segment.text.strip()
                     if text:
                         # Save to file
                         self.save_entry(text)
                         self.last_transcription = text
+                        text_found = True
+                
+                if not text_found:
+                    self.last_transcription = "[silence]"
+                    
             except Exception as e:
-                self.error_message = f"Transcribe: {str(e)[:20]}"
+                self.error_message = f"Transcribe error: {str(e)[:25]}"

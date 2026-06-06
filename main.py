@@ -230,11 +230,12 @@ class Fieldream:
             else:
                 volume = ream.get_current_volume()
                 meter = self.render_volume_meter(volume)
-                # Show last transcribed text if available
+                queue_size = ream.audio_queue.qsize()
+                # Show transcription status with debug info
                 if ream.last_transcription:
-                    status_msg = f"Recording... {meter} | {ream.last_transcription[:40]}"
+                    status_msg = f"{meter} | {ream.last_transcription[:50]}"
                 else:
-                    status_msg = f"Recording... {meter}"
+                    status_msg = f"{meter} | Q:{queue_size} | Listening..."
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(status_msg)
