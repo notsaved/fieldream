@@ -22,7 +22,8 @@ class InterviewRea(BaseRea):
         self.current_volume = 0  # RMS level (0-1)
         self.audio_enabled = False
         self.error_message = ""
-        self.device_info = ""  # Debug info about audio device
+        self.device_info = ""
+        self.selected_device = None  # Will be set in start_session()
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -34,33 +35,53 @@ class InterviewRea(BaseRea):
         
         try:
             import sounddevice as sd
-            self.audio_enabled = True
-        except ImportError:
-            self.error_message = "Missing: sounddevice"
+            import numpy as np
+        except ImportError as e:
+            self.error_message = f"Missing: {str(e)[:20]}"
             self.is_recording = False
             return
         
-        # List all devices immediately
+        # Find first available input device
         try:
             devices = sd.query_devices()
-            device_list = []
+            usb_device_id = None
             
+            # Look for USB device first
             if isinstance(devices, list):
                 for idx, device in enumerate(devices):
                     if isinstance(device, dict):
-                        name = device.get('name', 'Unknown')
+                        name = device.get('name', '').lower()
+                        max_in = device.get('max_input_channels', 0)
+                        if max_in > 0 and ('usb' in name or 'webcam' in name):
+                            usb_device_id = idx
+                            break
+            
+            # If no USB device found, use the first device with input channels
+            if usb_device_id is None and isinstance(devices, list):
+                for idx, device in enumerate(devices):
+                    if isinstance(device, dict):
                         max_in = device.get('max_input_channels', 0)
                         if max_in > 0:
-                            device_list.append(f"{idx}:{name}")
+                            usb_device_id = idx
+                            break
             
-            if device_list:
-                self.device_info = "Devices: " + " | ".join(device_list)
+            # Final fallback to default device
+            if usb_device_id is None:
+                usb_device_id = sd.default.device[0]
+            
+            # Get device name for display
+            if isinstance(devices, list) and usb_device_id < len(devices):
+                dev_name = devices[usb_device_id].get('name', 'Unknown') if isinstance(devices[usb_device_id], dict) else 'Unknown'
             else:
-                self.error_message = "No input devices found"
-                self.is_recording = False
-                return
+                dev_name = 'Default'
+            
+            self.device_info = f"Dev:{usb_device_id}({dev_name})"
+            
+            # Store device ID for use in audio thread
+            self.selected_device = usb_device_id
+            
         except Exception as e:
-            self.error_message = f"Device list error: {str(e)[:20]}"
+            self.error_message = f"Device error: {str(e)[:20]}"
             self.is_recording = False
             return
         
@@ -107,11 +128,10 @@ class InterviewRea(BaseRea):
             self.is_recording = False
             return
         
-        # Use default input device
-        try:
-            usb_device_id = sd.default.device[0]
-        except Exception as e:
-            self.error_message = f"No default device: {str(e)[:20]}"
+        # Use the device selected in start_session()
+        device_id = self.selected_device
+        if device_id is None:
+            self.error_message = "No audio device selected"
             self.is_recording = False
             return
         
@@ -121,7 +141,7 @@ class InterviewRea(BaseRea):
         
         try:
             # Create and start stream
-            stream = sd.InputStream(device=usb_device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32')
+            stream = sd.InputStream(device=device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32')
             stream.start()
             
             while self.is_recording:
@@ -139,4 +159,4 @@ class InterviewRea(BaseRea):
             stream.stop()
             stream.close()
         except Exception as e:
-            self.error_message = f"Audio error: {str(e)[:20]}"
+            self.error_message = f"Audio: {str(e)[:20]}"

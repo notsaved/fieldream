@@ -231,10 +231,8 @@ class Fieldream:
                 volume = ream.get_current_volume()
                 meter = self.render_volume_meter(volume)
                 # Show device info if available
-                if ream.device_info:
-                    status_msg = f"Recording... {meter} | {ream.device_info}"
-                else:
-                    status_msg = f"Recording... {meter}"
+                suffix = f" {ream.device_info}" if ream.device_info else ""
+                status_msg = f"Recording... {meter}{suffix}"
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(status_msg)
