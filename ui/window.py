@@ -114,21 +114,33 @@ class WindowManager:
                 color = curses.color_pair(4) if is_active else curses.color_pair(5)
                 self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
                 
-                # Content lines
+                # Wrap and display content lines
                 lines = ream_contents.get(key, "").split("\n") if key in ream_contents else []
                 offset = scroll_offsets.get(key, 0)
                 
-                for i in range(1, col_width // 2):
-                    if row + i >= self.height - 3:
+                # Convert lines to wrapped lines
+                wrapped_lines = []
+                for line in lines:
+                    # Simple word wrapping: split long lines
+                    while len(line) > col_width:
+                        wrapped_lines.append(line[:col_width])
+                        line = line[col_width:]
+                    if line or not wrapped_lines:
+                        wrapped_lines.append(line)
+                
+                # Display wrapped lines
+                display_rows = col_width // 2 - 1
+                for i in range(display_rows):
+                    if row + 1 + i >= self.height - 3:
                         break
                     
-                    line_idx = offset + i - 1
-                    if line_idx < len(lines):
-                        line = lines[line_idx][:col_width]
+                    line_idx = offset + i
+                    if line_idx < len(wrapped_lines):
+                        display_line = wrapped_lines[line_idx]
                     else:
-                        line = ""
+                        display_line = ""
                     
-                    self.stdscr.addstr(row + i, col_x, line)
+                    self.stdscr.addstr(row + 1 + i, col_x, display_line[:col_width])
                 
                 # Input line if active
                 if is_active:

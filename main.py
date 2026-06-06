@@ -213,30 +213,32 @@ class Fieldream:
                         self.scroll_offsets[self.active_ream] += 3
                     continue
                 
+                # Handle ream shortcuts (work in any mode)
+                if ch == 15:  # Ctrl+O - Toggle Observation
+                    if self.active_ream == "observation":
+                        self.toggle_ream("observation")  # Deactivate
+                    else:
+                        self.toggle_ream("observation")  # Activate
+                    continue
+                elif ch == 9:  # Ctrl+I - Toggle Interview
+                    self.toggle_ream("interview")
+                    continue
+                elif ch == 19:  # Ctrl+S - Toggle Snapshot
+                    self.toggle_ream("snapshot")
+                    continue
+                elif ch == 17:  # Ctrl+Q - Quit
+                    self.running = False
+                    continue
+                
+                # If a ream is active, handle text input
                 if self.active_ream:
-                    # Handle input for active ream
-                    if ch == 17:  # Ctrl+Q - Deactivate current ream
-                        if self.input_text.strip():
-                            self.status_message = "Entry in progress (press Enter to save, or Ctrl+Q to discard)"
-                        else:
-                            self.toggle_ream(self.active_ream)
-                    elif ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
+                    if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
                         self.save_active_entry()
                     elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
                         if self.input_text:
                             self.input_text = self.input_text[:-1]
                     elif 32 <= ch <= 126:  # Printable characters
                         self.input_text += chr(ch)
-                else:
-                    # Handle dashboard navigation
-                    if ch == 15:  # Ctrl+O - Toggle Observation
-                        self.toggle_ream("observation")
-                    elif ch == 9:  # Ctrl+I - Toggle Interview
-                        self.toggle_ream("interview")
-                    elif ch == 19:  # Ctrl+S - Toggle Snapshot
-                        self.toggle_ream("snapshot")
-                    elif ch == 17:  # Ctrl+Q - Quit
-                        self.running = False
                 
             except Exception as e:
                 self.status_message = f"Error: {str(e)[:40]}"
