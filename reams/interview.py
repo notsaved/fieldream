@@ -236,8 +236,8 @@ class InterviewRea(BaseRea):
                         self.last_transcription = "[empty file]"
                         continue
                     
-                    # Transcribe from file
-                    segments, info = self.whisper_model.transcribe(tmp_path, language="en")
+                    # Transcribe from file (auto-detect language)
+                    segments, info = self.whisper_model.transcribe(tmp_path)
                     
                     text_found = False
                     if segments:
