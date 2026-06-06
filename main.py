@@ -38,8 +38,8 @@ class Fieldream:
         
         # Ream management
         self.reams = {}
-        self.active_ream = None  # No ream active at start
-        self.input_text = ""  # Current input in active ream
+        self.active_reams = {"observation"}  # Observation always active
+        self.input_text = ""  # Current input in observation ream
         
         # Scrolling
         self.scroll_offsets = {}  # Track scroll position for each ream
@@ -100,7 +100,7 @@ class Fieldream:
                 "name": ream_config["name"],
                 "shortcut": ream_config["shortcut"],
                 "description": ream_config["description"],
-                "active": self.active_ream == key,
+                "active": key in self.active_reams,
             }
             statuses.append(status)
         return statuses
@@ -124,28 +124,27 @@ class Fieldream:
         return contents
 
     def toggle_ream(self, ream_key: str) -> None:
-        """Toggle a ream on or off.
+        """Toggle a ream on or off (Observation cannot be toggled).
         
         Args:
             ream_key: The ream key to toggle
         """
-        if self.active_ream == ream_key:
+        if ream_key == "observation":
+            return  # Observation is always active
+        
+        if ream_key in self.active_reams:
             # Deactivate
-            self.active_ream = None
-            self.input_text = ""
+            self.active_reams.remove(ream_key)
             if ream_key in self.reams and self.reams[ream_key].session_started:
                 self.reams[ream_key].end_session()
             self.status_message = f"Deactivated {ream_key}"
         else:
             # Activate
             if ream_key in self.reams:
-                self.active_ream = ream_key
-                self.input_text = ""
+                self.active_reams.add(ream_key)
                 if not self.reams[ream_key].session_started:
                     self.reams[ream_key].start_session()
-                # Reset scroll to bottom when activating
-                self.scroll_offsets[ream_key] = 0
-                self.status_message = f"Activated {ream_key} - type and press Enter to save"
+                self.status_message = f"Activated {ream_key}"
             else:
                 self.status_message = f"{ream_key} ream not yet implemented"
 
@@ -180,25 +179,24 @@ class Fieldream:
         return f"{meter} {db}dB"
     
     def save_active_entry(self) -> None:
-        """Save the current input as an entry in the active ream."""
-        if self.active_ream:
-            # Interview and Snapshot auto-save, so skip them
-            if self.active_ream in ("interview", "snapshot"):
-                self.status_message = "This ream auto-saves"
-                return
-            
-            text_to_save = self.input_text.strip()
-            if text_to_save:
-                ream = self.reams[self.active_ream]
-                filepath = ream.append_note(text_to_save)
-                char_count = len(text_to_save)
-                word_count = self.count_words(text_to_save)
-                self.status_message = f"✓ Saved: {char_count}/{word_count}"
-            else:
-                self.status_message = "Entry empty - nothing saved"
-            
-            # Always clear the input field after Enter
-            self.input_text = ""
+        """Save the current input as an entry in the observation ream."""
+        # Only Observation supports text input
+        ream = self.reams.get("observation")
+        if not ream:
+            self.status_message = "Observation ream not available"
+            return
+        
+        text_to_save = self.input_text.strip()
+        if text_to_save:
+            filepath = ream.append_note(text_to_save)
+            char_count = len(text_to_save)
+            word_count = self.count_words(text_to_save)
+            self.status_message = f"✓ Saved: {char_count}/{word_count}"
+        else:
+            self.status_message = "Entry empty - nothing saved"
+        
+        # Always clear the input field after Enter
+        self.input_text = ""
 
     def draw_dashboard(self) -> None:
         """Draw the dashboard view."""
@@ -211,34 +209,34 @@ class Fieldream:
             self.get_ream_statuses(),
             ream_contents=ream_contents,
             input_text=self.input_text,
-            active_ream=self.active_ream,
             scroll_offsets=self.scroll_offsets
         )
         
-        if self.active_ream:
-            footer_text = f"[{self.active_ream.upper()}] Type and press Enter | ↑↓: Scroll | Ctrl+Q: Deactivate"
-        else:
-            footer_text = "Ctrl+O: Observation | Ctrl+I: Interview | Ctrl+S: Snapshot | ↑↓: Scroll | Ctrl+Q: Quit"
+        # Footer text shows keyboard shortcuts
+        footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | ↑↓: Scroll | Ctrl+Q: Quit"
         
-        # Build status message with volume meter if interview is active
-        status_msg = self.status_message
-        if self.active_ream == "interview" and "interview" in self.reams:
+        # Prepare status bar data
+        volume = 0
+        transcription_status = ""
+        interview_active = False
+        
+        if "interview" in self.active_reams and "interview" in self.reams:
             ream = self.reams["interview"]
+            interview_active = True
             # Show error if present
             if ream.error_message:
-                status_msg = ream.error_message
+                transcription_status = f"Error: {ream.error_message[:20]}"
             else:
                 volume = ream.get_current_volume()
-                meter = self.render_volume_meter(volume)
-                queue_size = ream.audio_queue.qsize()
-                # Show transcription status with debug info
-                if ream.last_transcription:
-                    status_msg = f"{meter} | {ream.last_transcription[:50]}"
-                else:
-                    status_msg = f"{meter} | Q:{queue_size} | Listening..."
+                transcription_status = ream.transcription_status
         
         self.window_manager.draw_footer(footer_text)
-        self.window_manager.draw_status(status_msg)
+        self.window_manager.draw_status(
+            input_text=self.input_text,
+            volume=volume,
+            transcription_status=transcription_status,
+            interview_active=interview_active
+        )
         self.window_manager.refresh_all()
 
     def run(self) -> None:
@@ -274,22 +272,16 @@ class Fieldream:
                 
                 # Handle scrolling (available in any mode)
                 if ch == curses.KEY_UP:
-                    if self.active_ream and self.active_ream in self.scroll_offsets:
-                        self.scroll_offsets[self.active_ream] = max(0, self.scroll_offsets[self.active_ream] - 3)
+                    if "observation" in self.scroll_offsets:
+                        self.scroll_offsets["observation"] = max(0, self.scroll_offsets["observation"] - 3)
                     continue
                 elif ch == curses.KEY_DOWN:
-                    if self.active_ream and self.active_ream in self.scroll_offsets:
-                        self.scroll_offsets[self.active_ream] += 3
+                    if "observation" in self.scroll_offsets:
+                        self.scroll_offsets["observation"] += 3
                     continue
                 
-                # Handle ream shortcuts (work in any mode)
-                if ch == 15:  # Ctrl+O - Toggle Observation
-                    if self.active_ream == "observation":
-                        self.toggle_ream("observation")  # Deactivate
-                    else:
-                        self.toggle_ream("observation")  # Activate
-                    continue
-                elif ch == 9:  # Ctrl+I - Toggle Interview
+                # Handle ream shortcuts
+                if ch == 9:  # Ctrl+I - Toggle Interview
                     self.toggle_ream("interview")
                     continue
                 elif ch == 19:  # Ctrl+S - Toggle Snapshot
@@ -299,19 +291,18 @@ class Fieldream:
                     self.running = False
                     continue
                 
-                # If a ream is active, handle text input
-                if self.active_ream:
-                    if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
-                        self.save_active_entry()
-                    elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
-                        if self.input_text:
-                            self.input_text = self.input_text[:-1]
-                    elif 32 <= ch <= 126:  # Printable characters
-                        self.input_text += chr(ch)
+                # Observation is always active - handle text input
+                if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
+                    self.save_active_entry()
+                elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
+                    if self.input_text:
+                        self.input_text = self.input_text[:-1]
+                elif 32 <= ch <= 126:  # Printable characters
+                    self.input_text += chr(ch)
                 
             except Exception as e:
                 self.status_message = f"Error: {str(e)[:40]}"
-                self.window_manager.draw_status(self.status_message)
+                self.window_manager.draw_status(input_text=self.input_text)
                 self.window_manager.refresh_all()
                 time.sleep(0.1)
 

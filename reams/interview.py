@@ -28,6 +28,7 @@ class InterviewRea(BaseRea):
         self.whisper_model = None
         self.last_transcription = ""
         self.chunks_processed = 0  # For debugging
+        self.transcription_status = "[silence]"  # [silence], [voice], [processing], [done]
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -37,6 +38,7 @@ class InterviewRea(BaseRea):
         self.error_message = ""
         self.device_info = ""
         self.last_transcription = ""
+        self.transcription_status = "[silence]"
         
         try:
             import sounddevice as sd
@@ -171,6 +173,12 @@ class InterviewRea(BaseRea):
                         rms = np.sqrt(np.mean(audio_chunk ** 2))
                         self.current_volume = float(rms)
                         
+                        # Update transcription status based on audio level
+                        if rms > 0.02:  # Voice threshold
+                            self.transcription_status = "[voice]"
+                        else:
+                            self.transcription_status = "[silence]"
+                        
                         # Queue audio for transcription
                         self.audio_queue.put(audio_chunk)
                 except:
@@ -214,6 +222,9 @@ class InterviewRea(BaseRea):
                 if chunk_rms < 0.001:
                     continue
                 
+                # Set status to processing
+                self.transcription_status = "[processing]"
+                
                 # Boost quiet audio (RMS around 0.06 is too quiet for Whisper)
                 # Target RMS of about 0.15-0.2 for good transcription
                 target_rms = 0.15
@@ -234,6 +245,7 @@ class InterviewRea(BaseRea):
                     # Verify file exists and has content
                     if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 1000:
                         self.last_transcription = "[empty file]"
+                        self.transcription_status = "[silence]"
                         continue
                     
                     # Transcribe from file (auto-detect language)
@@ -247,11 +259,13 @@ class InterviewRea(BaseRea):
                                 # Save to file
                                 self.save_entry(text)
                                 self.last_transcription = text
+                                self.transcription_status = "[done]"
                                 text_found = True
                                 break
                     
                     if not text_found:
                         self.last_transcription = f"[waiting...]"
+                        self.transcription_status = "[silence]"
                 finally:
                     # Clean up temp file
                     if os.path.exists(tmp_path):

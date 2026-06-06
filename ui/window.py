@@ -1,6 +1,7 @@
 """Curses-based window management for Fieldream UI."""
 
 import curses
+from math import inf
 from typing import Optional, List, Dict
 
 
@@ -54,13 +55,41 @@ class WindowManager:
         except:
             pass
 
-    def draw_status(self, message: str) -> None:
-        """Draw status message at bottom."""
+    def draw_status(self, input_text: str = "", volume: float = 0, transcription_status: str = "", interview_active: bool = False) -> None:
+        """Draw consolidated status bar at bottom.
+        
+        Args:
+            input_text: Current input text for word/char count
+            volume: Current audio volume (0-1)
+            transcription_status: Status message from Interview ([silence], [voice], [processing], [done])
+            interview_active: Whether Interview ream is active
+        """
         try:
             status_y = self.height - 1
             self.stdscr.move(status_y, 0)
             self.stdscr.clrtoeol()
-            status_text = f" {message}"
+            
+            # Calculate word and character count
+            text_to_count = input_text.strip()
+            char_count = len(text_to_count)
+            word_count = len(text_to_count.split()) if text_to_count else 0
+            
+            # Build status text
+            status_parts = [f" Words: {word_count} | Chars: {char_count}"]
+            
+            # Add audio meter and status if Interview is active
+            if interview_active:
+                # Convert volume (0-1) to meter visualization
+                meter_width = 8
+                filled = int(volume * meter_width)
+                meter = "█" * filled + "░" * (meter_width - filled)
+                
+                # Convert RMS to dB (rough approximation: 20*log10(rms))
+                db = 20 * (volume ** 0.5) - 30 if volume > 0 else -inf
+                
+                status_parts.append(f" | [{meter}] {db:+.0f}dB | {transcription_status}")
+            
+            status_text = "".join(status_parts)
             status_text = status_text[:self.width-1]
             self.stdscr.addstr(status_y, 0, status_text)
         except:
@@ -74,7 +103,7 @@ class WindowManager:
             pass
 
     def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
-                       input_text: str = "", active_ream: str = None, scroll_offsets: Dict[str, int] = None) -> None:
+                       input_text: str = "", scroll_offsets: Dict[str, int] = None) -> None:
         """Draw the dashboard."""
         if ream_contents is None:
             ream_contents = {}
@@ -114,9 +143,9 @@ class WindowManager:
                 color = curses.color_pair(4) if is_active else curses.color_pair(5)
                 self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
                 
-                # Calculate input display lines first (if active)
+                # Calculate input display lines first (only for Observation)
                 input_display_lines = []
-                if is_active:
+                if key == "observation":
                     if input_text:
                         input_str = "> " + input_text
                     else:
@@ -165,8 +194,8 @@ class WindowManager:
                     self.stdscr.addstr(current_row, col_x, display_line[:col_width])
                     display_row += 1
                 
-                # Display input lines if active (grows upward from height-3)
-                if is_active and input_display_lines:
+                # Display input lines if Observation (grows upward from height-3)
+                if key == "observation" and input_display_lines:
                     input_start_row = self.height - 3 - num_input_lines
                     for idx, input_line in enumerate(input_display_lines):
                         current_row = input_start_row + idx
