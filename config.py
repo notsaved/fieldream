@@ -1,20 +1,12 @@
 """Configuration settings for Fieldream."""
 
-import os
 from pathlib import Path
 
 # Base paths
 BASE_DIR = Path(__file__).parent
 
-# Notes directory on Desktop (or user home if Desktop doesn't exist)
-DESKTOP_DIR = Path.home() / "Desktop"
-if DESKTOP_DIR.exists():
-    NOTES_DIR = DESKTOP_DIR / "Fieldream"
-else:
-    NOTES_DIR = Path.home() / "Fieldream"
-
-# Ensure notes directory exists
-NOTES_DIR.mkdir(exist_ok=True)
+# Note: NOTES_DIR is set dynamically at runtime after user selects location
+# We don't create any folders at startup - user will choose location first
 
 # Ream configurations (order matters for display)
 REAMS = [

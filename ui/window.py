@@ -97,42 +97,87 @@ class WindowManager:
         """
         return self.stdscr.getch()
 
-    def draw_dashboard(self, session_name: str, reams: List[Dict], input_text: str = "", active_ream: str = None) -> None:
-        """Draw the ream dashboard showing status of each ream.
+    def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
+                       input_text: str = "", active_ream: str = None, scroll_offsets: Dict[str, int] = None) -> None:
+        """Draw the 3-column ream dashboard.
         
         Args:
             session_name: Current session name
             reams: List of ream dictionaries with status
+            ream_contents: Dict mapping ream key to file contents
             input_text: Current input text if a ream is active
             active_ream: Key of the currently active ream
+            scroll_offsets: Dict mapping ream key to scroll offset
         """
+        if ream_contents is None:
+            ream_contents = {}
+        if scroll_offsets is None:
+            scroll_offsets = {}
+        
         self.clear_content()
         content_win = self.get_content_area()
         content_win.clear()
         
-        row = 1
-        content_win.addstr(row, 2, f"Session: {session_name}", curses.color_pair(3))
-        row += 3
+        # Column dimensions
+        col_width = self.width // 3 - 1
+        col_height = self.height - 4
         
-        content_win.addstr(row, 2, "Available Reams:", curses.A_BOLD)
-        row += 2
+        # Draw session info at top
+        session_text = f"Session: {session_name}"
+        content_win.addstr(0, (self.width - len(session_text)) // 2, session_text, curses.A_BOLD)
+        content_win.addstr(1, 0, "─" * self.width)
         
-        for ream in reams:
-            active = ream.get("active", False)
-            status = "● ACTIVE" if active else "○ inactive"
-            color_pair = curses.color_pair(4) if active else curses.color_pair(5)
+        row_start = 2
+        
+        # Draw 3 columns
+        for col_idx, ream in enumerate(reams):
+            if col_idx >= 3:
+                break
             
-            line = f"  [{ream['shortcut']}] {ream['name']:<15} {status}"
-            content_win.addstr(row, 2, line, color_pair)
-            content_win.addstr(row + 1, 4, ream['description'])
-            row += 3
-        
-        # Draw input area at bottom if a ream is active
-        if active_ream:
-            row += 2
-            if row < self.height - 4:
-                content_win.addstr(row, 2, f"[{active_ream.upper()}] Entry:", curses.A_BOLD)
-                row += 1
-                content_win.addstr(row, 2, "> " + input_text, curses.color_pair(3))
+            col_x = col_idx * (col_width + 1)
+            key = ream.get("key")
+            is_active = ream.get("active", False)
+            status_color = curses.color_pair(4) if is_active else curses.color_pair(5)
+            status_text = "● ACTIVE" if is_active else "○"
+            
+            # Draw column header
+            header = f"{ream['name'][:col_width-12]} {status_text:>8}"
+            content_win.addstr(row_start, col_x, header[:col_width], status_color | curses.A_BOLD)
+            
+            # Draw column divider
+            for dy in range(col_height + 1):
+                if col_idx < 2:  # Don't draw right border for last column
+                    try:
+                        content_win.addch(row_start + dy, col_x + col_width, "│")
+                    except:
+                        pass
+            
+            # Draw file contents
+            content_lines = ream_contents.get(key, "").split("\n")
+            scroll_offset = scroll_offsets.get(key, 0)
+            
+            display_height = col_height - 2 if is_active else col_height - 1
+            
+            for dy in range(display_height):
+                line_idx = scroll_offset + dy
+                if line_idx < len(content_lines):
+                    line = content_lines[line_idx][:col_width]
+                else:
+                    line = ""
+                
+                try:
+                    content_win.addstr(row_start + 1 + dy, col_x, line.ljust(col_width))
+                except:
+                    pass
+            
+            # Draw input area if active
+            if is_active:
+                input_y = row_start + col_height - 1
+                input_prompt = "> "
+                input_display = (input_prompt + input_text)[:(col_width)]
+                try:
+                    content_win.addstr(input_y, col_x, input_display.ljust(col_width), curses.color_pair(3))
+                except:
+                    pass
         
         content_win.refresh()

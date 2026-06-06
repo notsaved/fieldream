@@ -4,7 +4,7 @@ import curses
 import sys
 from pathlib import Path
 
-from config import NOTES_DIR, REAMS
+from config import NOTES_DIR, REAMS, BASE_DIR
 from ui.window import WindowManager
 from ui.startup import StartupScreen
 from utils.file_handler import FileHandler
@@ -33,6 +33,9 @@ class Fieldream:
         self.active_ream = None  # No ream active at start
         self.input_text = ""  # Current input in active ream
         
+        # Scrolling
+        self.scroll_offsets = {}  # Track scroll position for each ream
+        
         self.running = True
         self.status_message = "Ready"
 
@@ -43,7 +46,7 @@ class Fieldream:
             True if successful, False if cancelled
         """
         try:
-            startup = StartupScreen(self.stdscr, NOTES_DIR)
+            startup = StartupScreen(self.stdscr, BASE_DIR)
             result = startup.prompt_session_name()
             
             if result is None or len(result) != 2:
@@ -56,7 +59,7 @@ class Fieldream:
                 self.status_message = "Invalid session folder or name"
                 return False
             
-            self.file_handler = FileHandler(NOTES_DIR, self.session_folder)
+            self.file_handler = FileHandler(None, self.session_folder)
             
             # Initialize reams with the session file handler
             self.reams = {
@@ -64,6 +67,9 @@ class Fieldream:
                 # "interview": InterviewRea(self.file_handler),
                 # "snapshot": SnapshotRea(self.file_handler),
             }
+            
+            # Initialize scroll offsets
+            self.scroll_offsets = {key: 0 for key in self.reams.keys()}
             
             self.status_message = f"Session created: {self.session_name}"
             return True
@@ -89,6 +95,24 @@ class Fieldream:
             statuses.append(status)
         return statuses
 
+    def get_ream_contents(self) -> dict:
+        """Get current contents of all ream .md files.
+        
+        Returns:
+            Dict mapping ream key to file contents
+        """
+        contents = {}
+        for key, ream in self.reams.items():
+            if ream.session_started and ream.current_file:
+                try:
+                    with open(ream.current_file, "r", encoding="utf-8") as f:
+                        contents[key] = f.read()
+                except:
+                    contents[key] = ""
+            else:
+                contents[key] = ""
+        return contents
+
     def toggle_ream(self, ream_key: str) -> None:
         """Toggle a ream on or off.
         
@@ -107,6 +131,8 @@ class Fieldream:
                 self.input_text = ""
                 if not self.reams[ream_key].session_started:
                     self.reams[ream_key].start_session()
+                # Reset scroll to bottom when activating
+                self.scroll_offsets[ream_key] = 0
                 self.status_message = f"Activated {ream_key} - type and press Enter to save"
             else:
                 self.status_message = f"{ream_key} ream not yet implemented"
@@ -128,17 +154,22 @@ class Fieldream:
     def draw_dashboard(self) -> None:
         """Draw the dashboard view."""
         self.window_manager.draw_header("Fieldream", "Dashboard")
+        
+        ream_contents = self.get_ream_contents()
+        
         self.window_manager.draw_dashboard(
             self.session_name, 
             self.get_ream_statuses(),
+            ream_contents=ream_contents,
             input_text=self.input_text,
-            active_ream=self.active_ream
+            active_ream=self.active_ream,
+            scroll_offsets=self.scroll_offsets
         )
         
         if self.active_ream:
-            footer_text = f"[{self.active_ream.upper()}] Type and press Enter to save | Ctrl+Q to deactivate"
+            footer_text = f"[{self.active_ream.upper()}] Type and press Enter | ↑↓: Scroll | Ctrl+Q: Deactivate"
         else:
-            footer_text = "Ctrl+O: Observation | Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+Q: Quit"
+            footer_text = "Ctrl+O: Observation | Ctrl+I: Interview | Ctrl+S: Snapshot | ↑↓: Scroll | Ctrl+Q: Quit"
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(self.status_message)
@@ -167,6 +198,16 @@ class Fieldream:
                 
                 if ch == -1:
                     # No input available
+                    continue
+                
+                # Handle scrolling (available in any mode)
+                if ch == curses.KEY_UP:
+                    if self.active_ream and self.active_ream in self.scroll_offsets:
+                        self.scroll_offsets[self.active_ream] = max(0, self.scroll_offsets[self.active_ream] - 3)
+                    continue
+                elif ch == curses.KEY_DOWN:
+                    if self.active_ream and self.active_ream in self.scroll_offsets:
+                        self.scroll_offsets[self.active_ream] += 3
                     continue
                 
                 if self.active_ream:

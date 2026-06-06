@@ -8,15 +8,15 @@ from pathlib import Path
 class StartupScreen:
     """Handles session name input and creation."""
 
-    def __init__(self, stdscr, default_notes_dir: Path):
+    def __init__(self, stdscr, app_base_dir: Path):
         """Initialize startup screen.
         
         Args:
             stdscr: Curses standard screen object
-            default_notes_dir: Default path for notes directory
+            app_base_dir: Base application directory
         """
         self.stdscr = stdscr
-        self.default_notes_dir = default_notes_dir
+        self.app_base_dir = app_base_dir
         self.height, self.width = stdscr.getmaxyx()
 
     def prompt_session_name(self) -> tuple:
@@ -103,63 +103,69 @@ class StartupScreen:
             title = "Fieldream - Save Location"
             self.stdscr.addstr(2, (self.width - len(title)) // 2, title, curses.A_BOLD)
             
-            desktop_dir = self._get_desktop_dir()
-            home_dir = Path.home()
+            desktop_dir = Path.home() / "Desktop"
+            docs_dir = Path.home() / "Documents"
+            root_dir = self.app_base_dir
             
             options = [
-                ("D", "Desktop", desktop_dir),
-                ("H", "Home", home_dir),
-                ("C", "Custom path", None),
+                ("R", "Root folder (repo)", root_dir),
+                ("D", "Desktop", desktop_dir if desktop_dir.exists() else None),
+                ("C", "Documents", docs_dir if docs_dir.exists() else None),
+                ("T", "Target folder (custom path)", None),
             ]
             
             self.stdscr.addstr(5, 2, "Where to save session?")
-            self.stdscr.addstr(7, 2, "(Press D, H, or C)")
+            self.stdscr.addstr(7, 2, "(Press R, D, C, or T)")
             
-            for i, (key, label, path) in enumerate(options):
-                path_str = str(path) if path else ""
-                line = f"  [{key}] {label:<15} {path_str[:40]}"
-                self.stdscr.addstr(9 + i * 2, 4, line)
+            row = 9
+            for key, label, path in options:
+                if path is None and key != "T":
+                    # Skip non-existent paths unless it's the custom option
+                    continue
+                
+                path_str = str(path) if path else "[type path]"
+                display = f"  [{key}] {label:<25} {path_str[:35]}"
+                self.stdscr.addstr(row, 2, display)
+                row += 2
             
             self.stdscr.refresh()
             
             while True:
                 ch = self.stdscr.getch()
                 
-                if ch == ord('D') or ch == ord('d'):
-                    return desktop_dir
-                elif ch == ord('H') or ch == ord('h'):
-                    return home_dir
+                if ch == ord('R') or ch == ord('r'):
+                    return root_dir
+                elif ch == ord('D') or ch == ord('d'):
+                    if desktop_dir.exists():
+                        return desktop_dir
                 elif ch == ord('C') or ch == ord('c'):
+                    if docs_dir.exists():
+                        return docs_dir
+                elif ch == ord('T') or ch == ord('t'):
                     result = self._prompt_custom_path()
                     if result:
                         return result
-                    # If custom path returns None, go back to location menu
+                    # If custom path returns None, show location menu again
                     self.stdscr.clear()
                     self.stdscr.addstr(2, (self.width - len(title)) // 2, title, curses.A_BOLD)
                     self.stdscr.addstr(5, 2, "Where to save session?")
-                    self.stdscr.addstr(7, 2, "(Press D, H, or C)")
-                    for i, (key, label, path) in enumerate(options):
-                        path_str = str(path) if path else ""
-                        line = f"  [{key}] {label:<15} {path_str[:40]}"
-                        self.stdscr.addstr(9 + i * 2, 4, line)
+                    self.stdscr.addstr(7, 2, "(Press R, D, C, or T)")
+                    row = 9
+                    for key, label, path in options:
+                        if path is None and key != "T":
+                            continue
+                        path_str = str(path) if path else "[type path]"
+                        display = f"  [{key}] {label:<25} {path_str[:35]}"
+                        self.stdscr.addstr(row, 2, display)
+                        row += 2
                     self.stdscr.refresh()
                 elif ch == 3:  # Ctrl+C
                     raise KeyboardInterrupt()
+        
         except KeyboardInterrupt:
             return None
         except Exception:
             return None
-
-    def _get_desktop_dir(self) -> Path:
-        """Get desktop directory, fallback to home if doesn't exist.
-        
-        Returns:
-            Path to desktop or home
-        """
-        desktop = Path.home() / "Desktop"
-        if desktop.exists():
-            return desktop
-        return Path.home()
 
     def _prompt_custom_path(self) -> Path:
         """Prompt user for custom save path.
@@ -173,7 +179,7 @@ class StartupScreen:
             title = "Fieldream - Custom Path"
             self.stdscr.addstr(2, (self.width - len(title)) // 2, title, curses.A_BOLD)
             
-            self.stdscr.addstr(5, 2, "Enter full path (e.g., /home/user/fieldream):")
+            self.stdscr.addstr(5, 2, "Enter full path (e.g., /home/user/mydata):")
             self.stdscr.addstr(7, 2, "Path: ")
             
             curses.curs_set(1)
@@ -193,7 +199,7 @@ class StartupScreen:
                         input_str = input_str[:-1]
                 elif ch == ord('\n'):
                     path = Path(input_str.strip())
-                    if path.parent.exists() or path == path.parent:
+                    if path.parent.exists() or path == path.parent or path.exists():
                         curses.curs_set(0)
                         return path
                     else:
@@ -202,6 +208,7 @@ class StartupScreen:
                         self.stdscr.getch()
                         input_str = ""
                         self.stdscr.addstr(7, 8, " " * 70)
+                        self.stdscr.addstr(9, 2, " " * 70)
                         self.stdscr.refresh()
                 elif 32 <= ch <= 126:  # Printable characters
                     if len(input_str) < 80:
