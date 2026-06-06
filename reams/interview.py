@@ -155,7 +155,7 @@ class InterviewRea(BaseRea):
             return
         
         sample_rate = 16000
-        chunk_duration = 3  # 3-second chunks for better Whisper detection
+        chunk_duration = 5  # 5-second chunks for better Whisper detection
         chunk_size = int(sample_rate * chunk_duration)
         
         try:
@@ -199,7 +199,7 @@ class InterviewRea(BaseRea):
         while self.is_recording or not self.audio_queue.empty():
             try:
                 # Get audio chunk with timeout
-                audio_chunk = self.audio_queue.get(timeout=2)
+                audio_chunk = self.audio_queue.get(timeout=3)
             except queue.Empty:
                 continue
             
@@ -210,18 +210,31 @@ class InterviewRea(BaseRea):
                 # Calculate RMS for debugging
                 chunk_rms = np.sqrt(np.mean(audio_chunk ** 2))
                 
-                # Skip if too quiet
-                if chunk_rms < 0.01:
-                    self.last_transcription = f"[too quiet]"
+                # Skip silence
+                if chunk_rms < 0.001:
                     continue
+                
+                # Boost quiet audio (RMS around 0.06 is too quiet for Whisper)
+                # Target RMS of about 0.15-0.2 for good transcription
+                target_rms = 0.15
+                if chunk_rms > 0:
+                    audio_chunk = audio_chunk * (target_rms / chunk_rms)
+                
+                # Clip to prevent distortion
+                audio_chunk = np.clip(audio_chunk, -1.0, 1.0)
                 
                 # Write to temporary WAV file
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
                     tmp_path = tmp.name
                 
                 try:
-                    # Write audio to WAV file at 16kHz
+                    # Write audio to WAV file at 16kHz (soundfile handles normalization)
                     sf.write(tmp_path, audio_chunk, 16000)
+                    
+                    # Verify file exists and has content
+                    if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 1000:
+                        self.last_transcription = "[empty file]"
+                        continue
                     
                     # Transcribe from file
                     segments, info = self.whisper_model.transcribe(tmp_path, language="en")
@@ -238,11 +251,14 @@ class InterviewRea(BaseRea):
                                 break
                     
                     if not text_found:
-                        self.last_transcription = f"[no speech]"
+                        self.last_transcription = f"[waiting...]"
                 finally:
                     # Clean up temp file
                     if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
+                        try:
+                            os.remove(tmp_path)
+                        except:
+                            pass
                     
             except Exception as e:
                 self.error_message = f"Error: {str(e)[:25]}"
