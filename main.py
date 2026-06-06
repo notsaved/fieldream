@@ -200,6 +200,9 @@ class Fieldream:
                     # No input available
                     continue
                 
+                # Debug: show what key was pressed
+                self.status_message = f"Key: {ch}"
+                
                 # Handle scrolling (available in any mode)
                 if ch == curses.KEY_UP:
                     if self.active_ream and self.active_ream in self.scroll_offsets:
