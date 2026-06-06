@@ -224,9 +224,13 @@ class Fieldream:
         status_msg = self.status_message
         if self.active_ream == "interview" and "interview" in self.reams:
             ream = self.reams["interview"]
-            volume = ream.get_current_volume()
-            meter = self.render_volume_meter(volume)
-            status_msg = f"Recording... {meter}"
+            # Show error if present
+            if ream.error_message:
+                status_msg = ream.error_message
+            else:
+                volume = ream.get_current_volume()
+                meter = self.render_volume_meter(volume)
+                status_msg = f"Recording... {meter}"
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(status_msg)

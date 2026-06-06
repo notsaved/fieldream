@@ -76,8 +76,29 @@ class InterviewRea(BaseRea):
         try:
             import sounddevice as sd
             import numpy as np
-        except ImportError:
-            self.error_message = "Error: sounddevice/numpy not installed"
+        except ImportError as e:
+            self.error_message = f"Missing: {str(e)[:25]}"
+            self.is_recording = False
+            return
+        
+        # List available devices and find USB device
+        try:
+            devices = sd.query_devices()
+            usb_device_id = None
+            
+            # Look for USB device (contains 'USB' in name)
+            if isinstance(devices, list):
+                for idx, device in enumerate(devices):
+                    if isinstance(device, dict) and 'name' in device:
+                        if 'USB' in device['name'] or 'usb' in device['name']:
+                            usb_device_id = idx
+                            break
+            
+            # If no explicit USB device, try default input
+            if usb_device_id is None:
+                usb_device_id = sd.default.device[0]  # Use default input device
+        except Exception as e:
+            self.error_message = f"Device: {str(e)[:25]}"
             self.is_recording = False
             return
         
@@ -86,7 +107,7 @@ class InterviewRea(BaseRea):
         chunk_size = int(sample_rate * chunk_duration)
         
         try:
-            with sd.InputStream(samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32'):
+            with sd.InputStream(device=usb_device_id, samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32'):
                 while self.is_recording:
                     # Read audio chunk
                     audio_chunk, _ = sd.read(frames=chunk_size, dtype='float32')
@@ -96,4 +117,4 @@ class InterviewRea(BaseRea):
                         rms = np.sqrt(np.mean(audio_chunk ** 2))
                         self.current_volume = float(rms)
         except Exception as e:
-            self.error_message = f"Error: {str(e)}"
+            self.error_message = f"Audio: {str(e)[:25]}"
