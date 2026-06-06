@@ -179,17 +179,15 @@ class WindowManager:
                         line = line[col_width:]
                     wrapped_lines.append(line)
                 
-                # Auto-scroll to bottom if content grew
+                # Calculate max scroll offset
                 total_wrapped = len(wrapped_lines)
-                if total_wrapped > display_height:
-                    # Show the last display_height lines
-                    offset = total_wrapped - display_height
-                else:
-                    offset = 0
+                max_offset = max(0, total_wrapped - display_height)
                 
-                scroll_offsets[key] = offset
+                # Get current scroll offset from user input, clamped to valid range
+                current_offset = scroll_offsets.get(key, 0)
+                offset = min(current_offset, max_offset)
                 
-                # Display wrapped content lines (from row+1 onwards, up to max_content_row)
+                # Display wrapped content lines (from offset onwards, up to max_content_row)
                 display_row = 0
                 for i in range(offset, len(wrapped_lines)):
                     current_row = row + 1 + display_row

@@ -268,13 +268,8 @@ class Fieldream:
                 ch = self.stdscr.getch()
                 
                 if ch == -1:
-                    # No input available
-                    # Update status with live count if observation is active
-                    if self.active_ream == "observation" and self.input_text:
-                        char_count = len(self.input_text)
-                        word_count = self.count_words(self.input_text)
-                        self.status_message = f"Typing: {char_count}/{word_count}"
-                    # Volume meter for interview will be handled in draw_dashboard
+                    # No input available - continue to next frame
+                    # Status bar updated in draw_dashboard()
                     continue
                 
                 # Handle column navigation and scrolling

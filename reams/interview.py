@@ -174,14 +174,19 @@ class InterviewRea(BaseRea):
                         rms = np.sqrt(np.mean(audio_chunk ** 2))
                         self.current_volume = float(rms)
                         
-                        # Update transcription status based on audio level
-                        if rms > 0.02:  # Voice threshold
-                            self.transcription_status = "[voice]"
+                        # Skip queueing silent chunks entirely
+                        if rms > 0.002:  # Slightly higher threshold to avoid queueing near-silence
+                            # Update status based on audio level
+                            if rms > 0.02:  # Voice threshold
+                                self.transcription_status = "[voice]"
+                            else:
+                                self.transcription_status = "[silence]"
+                            
+                            # Don't queue if backlog is too large (prevents accumulation)
+                            if self.audio_queue.qsize() < 3:  # Max 3 chunks in queue
+                                self.audio_queue.put(audio_chunk)
                         else:
                             self.transcription_status = "[silence]"
-                        
-                        # Queue audio for transcription
-                        self.audio_queue.put(audio_chunk)
                 except:
                     pass
             
@@ -207,8 +212,8 @@ class InterviewRea(BaseRea):
         
         while self.is_recording or not self.audio_queue.empty():
             try:
-                # Get audio chunk with timeout
-                audio_chunk = self.audio_queue.get(timeout=3)
+                # Get audio chunk with shorter timeout to be more responsive
+                audio_chunk = self.audio_queue.get(timeout=1)
             except queue.Empty:
                 continue
             
@@ -219,8 +224,9 @@ class InterviewRea(BaseRea):
                 # Calculate RMS for debugging
                 chunk_rms = np.sqrt(np.mean(audio_chunk ** 2))
                 
-                # Skip silence
+                # Double-check silence (shouldn't happen but safety net)
                 if chunk_rms < 0.001:
+                    self.chunks_being_processed = max(0, self.chunks_being_processed - 1)
                     continue
                 
                 # Set status to processing and increment chunk counter
