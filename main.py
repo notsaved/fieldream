@@ -9,7 +9,14 @@ from ui.window import WindowManager
 from ui.startup import StartupScreen
 from utils.file_handler import FileHandler
 from reams.observation import ObservationRea
-from reams.interview import InterviewRea
+
+# Try to import interview, but don't fail if audio libs missing
+try:
+    from reams.interview import InterviewRea
+    HAS_INTERVIEW = True
+except ImportError:
+    HAS_INTERVIEW = False
+    InterviewRea = None
 
 
 class Fieldream:
@@ -65,9 +72,11 @@ class Fieldream:
             # Initialize reams with the session file handler
             self.reams = {
                 "observation": ObservationRea(self.file_handler),
-                "interview": InterviewRea(self.file_handler),
-                # "snapshot": SnapshotRea(self.file_handler),
             }
+            
+            # Add interview if available
+            if HAS_INTERVIEW and InterviewRea:
+                self.reams["interview"] = InterviewRea(self.file_handler)
             
             # Initialize scroll offsets
             self.scroll_offsets = {key: 0 for key in self.reams.keys()}

@@ -2,8 +2,19 @@
 
 import threading
 import queue
-import numpy as np
-from faster_whisper import WhisperModel
+
+# Check for required dependencies
+try:
+    import numpy as np
+    from faster_whisper import WhisperModel
+    import sounddevice as sd
+except ImportError as e:
+    raise ImportError(
+        "Interview ream requires: faster-whisper, sounddevice, numpy\n"
+        "Install with: pip install faster-whisper sounddevice numpy\n"
+        f"Original error: {e}"
+    )
+
 from reams.base import BaseRea
 from utils.file_handler import FileHandler
 
@@ -121,12 +132,6 @@ class InterviewRea(BaseRea):
     
     def _audio_capture_worker(self) -> None:
         """Background thread: capture audio from microphone."""
-        try:
-            import sounddevice as sd
-        except ImportError:
-            self.last_transcription = "Error: sounddevice not installed"
-            return
-        
         sample_rate = 16000
         chunk_duration = 2  # Process 2-second chunks
         chunk_size = sample_rate * chunk_duration
