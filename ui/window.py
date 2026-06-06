@@ -1,7 +1,7 @@
 """Curses-based window management for Fieldream UI."""
 
 import curses
-from typing import Optional, Callable, List, Dict
+from typing import Optional, List, Dict
 
 
 class WindowManager:
@@ -18,16 +18,6 @@ class WindowManager:
         
         # Initialize color pairs
         self._init_colors()
-        
-        # Create sub-windows
-        self.header_win = curses.newwin(1, self.width, 0, 0)
-        self.content_win = curses.newwin(
-            self.height - 3, self.width, 1, 0
-        )
-        self.footer_win = curses.newwin(1, self.width, self.height - 2, 0)
-        self.status_win = curses.newwin(1, self.width, self.height - 1, 0)
-        
-        self.content_win.scrollok(True)
 
     def _init_colors(self) -> None:
         """Initialize color pairs for the UI."""
@@ -39,150 +29,114 @@ class WindowManager:
             curses.init_pair(5, curses.COLOR_RED, curses.COLOR_BLACK)     # Inactive ream
 
     def draw_header(self, title: str, subtitle: str = "") -> None:
-        """Draw the header bar.
-        
-        Args:
-            title: Application title
-            subtitle: Optional subtitle
-        """
-        self.header_win.clear()
-        if subtitle:
-            header_text = f" {title} | {subtitle}"
-        else:
-            header_text = f" {title}"
-        self.header_win.addstr(0, 0, header_text[:self.width], curses.color_pair(1))
-        self.header_win.refresh()
-
-    def draw_footer(self, text: str) -> None:
-        """Draw the footer bar with help text.
-        
-        Args:
-            text: Footer text
-        """
-        self.footer_win.clear()
-        footer_text = f" {text}"
-        self.footer_win.addstr(0, 0, footer_text[:self.width], curses.color_pair(2))
-        self.footer_win.refresh()
-
-    def draw_status(self, message: str) -> None:
-        """Draw status message at bottom.
-        
-        Args:
-            message: Status message to display
-        """
+        """Draw the header bar."""
         try:
-            self.status_win.clear()
-            status_text = f" {message}"[:self.width - 1]
-            self.status_win.addstr(0, 0, status_text)
-            self.status_win.refresh()
+            self.stdscr.move(0, 0)
+            self.stdscr.clrtoeol()
+            if subtitle:
+                header_text = f" {title} | {subtitle}"
+            else:
+                header_text = f" {title}"
+            header_text = header_text[:self.width-1]
+            self.stdscr.addstr(0, 0, header_text, curses.color_pair(1))
         except:
             pass
 
-    def get_content_area(self):
-        """Return the content window for writing."""
-        return self.content_win
+    def draw_footer(self, text: str) -> None:
+        """Draw the footer bar with help text."""
+        try:
+            footer_y = self.height - 2
+            self.stdscr.move(footer_y, 0)
+            self.stdscr.clrtoeol()
+            footer_text = f" {text}"
+            footer_text = footer_text[:self.width-1]
+            self.stdscr.addstr(footer_y, 0, footer_text, curses.color_pair(2))
+        except:
+            pass
 
-    def clear_content(self) -> None:
-        """Clear the content area."""
-        self.content_win.clear()
+    def draw_status(self, message: str) -> None:
+        """Draw status message at bottom."""
+        try:
+            status_y = self.height - 1
+            self.stdscr.move(status_y, 0)
+            self.stdscr.clrtoeol()
+            status_text = f" {message}"
+            status_text = status_text[:self.width-1]
+            self.stdscr.addstr(status_y, 0, status_text)
+        except:
+            pass
 
     def refresh_all(self) -> None:
-        """Refresh all windows."""
-        self.header_win.refresh()
-        self.content_win.refresh()
-        self.footer_win.refresh()
-        self.status_win.refresh()
-
-    def getch(self) -> int:
-        """Get a single character input (non-blocking if set).
-        
-        Returns:
-            Character code
-        """
-        return self.stdscr.getch()
+        """Refresh screen."""
+        try:
+            self.stdscr.refresh()
+        except:
+            pass
 
     def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
                        input_text: str = "", active_ream: str = None, scroll_offsets: Dict[str, int] = None) -> None:
-        """Draw the 3-column ream dashboard.
-        
-        Args:
-            session_name: Current session name
-            reams: List of ream dictionaries with status
-            ream_contents: Dict mapping ream key to file contents
-            input_text: Current input text if a ream is active
-            active_ream: Key of the currently active ream
-            scroll_offsets: Dict mapping ream key to scroll offset
-        """
+        """Draw the dashboard."""
         if ream_contents is None:
             ream_contents = {}
         if scroll_offsets is None:
             scroll_offsets = {}
         
         try:
-            self.clear_content()
-            content_win = self.get_content_area()
-            content_win.clear()
+            # Clear content area
+            for y in range(1, self.height - 2):
+                self.stdscr.move(y, 0)
+                self.stdscr.clrtoeol()
             
-            max_y, max_x = self.height - 4, self.width
+            # Draw session header
+            session_text = f"Session: {session_name}"[:self.width-1]
+            self.stdscr.addstr(1, 0, session_text, curses.A_BOLD)
             
-            # Draw session info at top
-            session_text = f"Session: {session_name}"[:max_x-1]
-            content_win.addstr(0, 0, session_text, curses.A_BOLD)
-            content_win.addstr(1, 0, "=" * (max_x - 1))
+            # Draw separator
+            self.stdscr.addstr(2, 0, "=" * (self.width - 1))
             
-            # Simple text-only layout for now
-            row = 2
-            col_width = (max_x - 4) // 3
+            # Draw 3 columns
+            col_width = (self.width - 4) // 3
+            row = 3
             
             for col_idx, ream in enumerate(reams):
-                if col_idx >= 3 or row >= max_y:
+                if col_idx >= 3:
+                    break
+                if row >= self.height - 2:
                     break
                 
                 col_x = col_idx * (col_width + 2)
-                if col_x >= max_x:
-                    break
-                
                 key = ream.get("key")
                 is_active = ream.get("active", False)
-                status = "[●]" if is_active else "[ ]"
                 
-                # Header
-                header = f"{ream['name'][:col_width-5]} {status}"
-                header_safe = header[:col_width]
-                try:
-                    content_win.addstr(row, col_x, header_safe, curses.color_pair(4 if is_active else 5) | curses.A_BOLD)
-                except:
-                    pass
+                # Column header
+                status_char = "*" if is_active else " "
+                header = f"[{status_char}] {ream['name']}"[:col_width]
+                color = curses.color_pair(4) if is_active else curses.color_pair(5)
+                self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
                 
-                # Content
+                # Content lines
                 lines = ream_contents.get(key, "").split("\n") if key in ream_contents else []
                 offset = scroll_offsets.get(key, 0)
                 
                 for i in range(1, col_width // 2):
-                    line_idx = offset + i - 1
-                    if row + i >= max_y:
+                    if row + i >= self.height - 3:
                         break
                     
+                    line_idx = offset + i - 1
                     if line_idx < len(lines):
                         line = lines[line_idx][:col_width]
                     else:
                         line = ""
                     
-                    try:
-                        content_win.addstr(row + i, col_x, line.ljust(col_width)[:col_width])
-                    except:
-                        pass
+                    self.stdscr.addstr(row + i, col_x, line)
                 
                 # Input line if active
                 if is_active:
                     input_row = row + col_width // 2
-                    if input_row < max_y:
+                    if input_row < self.height - 3:
                         input_str = ("> " + input_text)[:col_width]
-                        try:
-                            content_win.addstr(input_row, col_x, input_str.ljust(col_width)[:col_width], curses.color_pair(3))
-                        except:
-                            pass
+                        self.stdscr.addstr(input_row, col_x, input_str, curses.color_pair(3))
             
-            content_win.refresh()
+            self.stdscr.refresh()
         except Exception as e:
             pass
