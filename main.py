@@ -187,12 +187,6 @@ class Fieldream:
         
         self.stdscr.nodelay(True)  # Non-blocking input
         
-        # Debug log file in session folder
-        debug_log_path = self.session_folder / "debug.log"
-        debug_log = open(debug_log_path, "w")
-        debug_log.write("Starting main loop\n")
-        debug_log.flush()
-        
         while self.running:
             try:
                 # Add small delay to prevent rapid flashing
@@ -202,13 +196,12 @@ class Fieldream:
                 
                 ch = self.stdscr.getch()
                 
-                if ch != -1:
-                    debug_log.write(f"Key pressed: {ch}\n")
-                    debug_log.flush()
-                
                 if ch == -1:
                     # No input available
                     continue
+                
+                # Show key code in status
+                self.status_message = f"Key: {ch}"
                 
                 # Handle scrolling (available in any mode)
                 if ch == curses.KEY_UP:
@@ -237,29 +230,19 @@ class Fieldream:
                 else:
                     # Handle dashboard navigation
                     if ch == 15:  # Ctrl+O - Toggle Observation
-                        debug_log.write("Ctrl+O pressed\n")
-                        debug_log.flush()
                         self.toggle_ream("observation")
                     elif ch == 9:  # Ctrl+I - Toggle Interview
-                        debug_log.write("Ctrl+I pressed\n")
-                        debug_log.flush()
                         self.toggle_ream("interview")
                     elif ch == 19:  # Ctrl+S - Toggle Snapshot
-                        debug_log.write("Ctrl+S pressed\n")
-                        debug_log.flush()
                         self.toggle_ream("snapshot")
                     elif ch == 17:  # Ctrl+Q - Quit
                         self.running = False
                 
             except Exception as e:
-                debug_log.write(f"Exception: {str(e)}\n")
-                debug_log.flush()
                 self.status_message = f"Error: {str(e)[:40]}"
                 self.window_manager.draw_status(self.status_message)
                 self.window_manager.refresh_all()
                 time.sleep(0.1)
-        
-        debug_log.close()
 
 
 def main(stdscr):
