@@ -22,6 +22,7 @@ class InterviewRea(BaseRea):
         self.current_volume = 0  # RMS level (0-1)
         self.audio_enabled = False
         self.error_message = ""
+        self.device_info = ""  # Debug info about audio device
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -81,24 +82,44 @@ class InterviewRea(BaseRea):
             self.is_recording = False
             return
         
-        # List available devices and find USB device
+        # List all available devices for debugging
+        try:
+            devices = sd.query_devices()
+            device_list = []
+            
+            if isinstance(devices, list):
+                for idx, device in enumerate(devices):
+                    if isinstance(device, dict):
+                        name = device.get('name', 'Unknown')
+                        max_in = device.get('max_input_channels', 0)
+                        if max_in > 0:
+                            device_list.append(f"{idx}:{name}({max_in}in)")
+            
+            # Show device list in debug info
+            self.device_info = "Devices: " + ", ".join(device_list[:3])
+        except:
+            pass
+        
+        # Find USB device
         usb_device_id = None
         try:
             devices = sd.query_devices()
             
-            # Log device info for debugging
             if isinstance(devices, list):
                 for idx, device in enumerate(devices):
                     if isinstance(device, dict) and 'name' in device:
-                        if 'USB' in device['name'] or 'usb' in device['name']:
+                        name = device['name'].lower()
+                        if 'usb' in name or 'webcam' in name or 'mic' in name:
                             usb_device_id = idx
+                            self.device_info = f"Found USB device {idx}: {device['name']}"
                             break
             
             # If no explicit USB device, try default input
             if usb_device_id is None:
-                usb_device_id = sd.default.device[0]  # Use default input device
-            
-            self.error_message = f"Using device: {usb_device_id}"
+                usb_device_id = sd.default.device[0]
+                default_dev = devices[usb_device_id] if isinstance(devices, list) else {}
+                dev_name = default_dev.get('name', 'default') if isinstance(default_dev, dict) else 'default'
+                self.device_info = f"Using default device {usb_device_id}: {dev_name}"
         except Exception as e:
             self.error_message = f"Device: {str(e)[:25]}"
             self.is_recording = False
