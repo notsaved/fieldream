@@ -9,6 +9,7 @@ from ui.window import WindowManager
 from ui.startup import StartupScreen
 from utils.file_handler import FileHandler
 from reams.observation import ObservationRea
+from reams.interview import InterviewRea
 
 
 class Fieldream:
@@ -64,7 +65,7 @@ class Fieldream:
             # Initialize reams with the session file handler
             self.reams = {
                 "observation": ObservationRea(self.file_handler),
-                # "interview": InterviewRea(self.file_handler),
+                "interview": InterviewRea(self.file_handler),
                 # "snapshot": SnapshotRea(self.file_handler),
             }
             
@@ -123,6 +124,8 @@ class Fieldream:
             # Deactivate
             self.active_ream = None
             self.input_text = ""
+            if ream_key in self.reams and self.reams[ream_key].session_started:
+                self.reams[ream_key].end_session()
             self.status_message = f"Deactivated {ream_key}"
         else:
             # Activate
@@ -140,6 +143,11 @@ class Fieldream:
     def save_active_entry(self) -> None:
         """Save the current input as an entry in the active ream."""
         if self.active_ream:
+            # Interview and Snapshot auto-save, so skip them
+            if self.active_ream in ("interview", "snapshot"):
+                self.status_message = "This ream auto-saves"
+                return
+            
             text_to_save = self.input_text.strip()
             if text_to_save:
                 ream = self.reams[self.active_ream]

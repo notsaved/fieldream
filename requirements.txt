@@ -1,1 +1,4 @@
 windows-curses>=2.4.0; sys_platform == 'win32'
+faster-whisper>=0.10.0
+sounddevice>=0.4.6
+numpy>=1.21.0
