@@ -1,4 +1,4 @@
-"""Interview ream - Speech-to-text transcription with speaker detection."""
+"""Interview ream - Audio capture and volume monitoring (transcription coming next)."""
 
 import threading
 import queue
@@ -7,61 +7,8 @@ from reams.base import BaseRea
 from utils.file_handler import FileHandler
 
 
-class SpeakerDetector:
-    """Simple speaker detection using silence/activity patterns."""
-    
-    def __init__(self, sample_rate=16000, silence_threshold=0.02, min_silence_duration=0.5):
-        """Initialize speaker detector.
-        
-        Args:
-            sample_rate: Audio sample rate in Hz
-            silence_threshold: RMS threshold below which audio is considered silence
-            min_silence_duration: Seconds of silence needed to detect speaker change
-        """
-        self.sample_rate = sample_rate
-        self.silence_threshold = silence_threshold
-        self.min_silence_duration = min_silence_duration
-        self.silence_duration = 0
-        self.current_speaker = 1
-        self.last_speaker = 0
-    
-    def detect(self, audio_chunk) -> tuple:
-        """Detect if speaker changed.
-        
-        Args:
-            audio_chunk: Audio data as numpy array
-            
-        Returns:
-            Tuple of (is_speech, speaker_id, speaker_changed)
-        """
-        import numpy as np
-        
-        # Calculate RMS (volume)
-        rms = np.sqrt(np.mean(audio_chunk ** 2))
-        chunk_duration = len(audio_chunk) / self.sample_rate
-        
-        if rms < self.silence_threshold:
-            # Silence detected
-            self.silence_duration += chunk_duration
-        else:
-            # Speech detected
-            self.silence_duration = 0
-        
-        speaker_changed = False
-        if self.silence_duration >= self.min_silence_duration:
-            # Long silence = speaker change
-            if self.current_speaker == self.last_speaker:
-                self.current_speaker = 3 - self.current_speaker  # Toggle 1 <-> 2
-                self.last_speaker = self.current_speaker
-                speaker_changed = True
-            self.silence_duration = 0
-        
-        is_speech = rms >= self.silence_threshold
-        return is_speech, self.current_speaker, speaker_changed
-
-
 class InterviewRea(BaseRea):
-    """Interview ream for speech-to-text transcription."""
+    """Interview ream for audio capture and monitoring."""
     
     def __init__(self, file_handler: FileHandler):
         """Initialize interview ream.
@@ -71,42 +18,25 @@ class InterviewRea(BaseRea):
         """
         super().__init__(file_handler, "interview", "Interview")
         self.is_recording = False
-        self.audio_queue = queue.Queue()
-        self.transcription_thread = None
-        self.whisper_model = None
-        self.speaker_detector = None
-        self.current_speaker = 1
-        self.last_transcription = ""
+        self.audio_thread = None
+        self.current_volume = 0  # RMS level (0-1)
+        self.audio_enabled = False
+        self.error_message = ""
     
     def start_session(self) -> None:
-        """Start a new interview session."""
+        """Start a new interview session (audio capture)."""
         super().start_session()
         self.is_recording = True
-        self.current_speaker = 1
+        self.current_volume = 0
+        self.error_message = ""
         
         try:
-            # Lazy import - only when actually used
-            from faster_whisper import WhisperModel
+            import sounddevice
+            self.audio_enabled = True
         except ImportError:
-            self.last_transcription = "Error: faster-whisper not installed"
+            self.error_message = "Error: sounddevice not installed"
             self.is_recording = False
             return
-        
-        try:
-            # Initialize Whisper model (base is good for Pi)
-            if self.whisper_model is None:
-                self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
-        except Exception as e:
-            self.last_transcription = f"Error loading model: {str(e)}"
-            self.is_recording = False
-            return
-        
-        # Initialize speaker detector
-        self.speaker_detector = SpeakerDetector()
-        
-        # Start transcription thread
-        self.transcription_thread = threading.Thread(target=self._transcription_worker, daemon=True)
-        self.transcription_thread.start()
         
         # Start audio capture thread
         self.audio_thread = threading.Thread(target=self._audio_capture_worker, daemon=True)
@@ -131,69 +61,39 @@ class InterviewRea(BaseRea):
         Returns:
             Help text
         """
-        return "Interview | Recording... | Ctrl+O: Stop | ↑↓: Scroll"
+        return "Interview | Recording... | Ctrl+I: Stop | ↑↓: Scroll"
+    
+    def get_current_volume(self) -> float:
+        """Get current audio volume level.
+        
+        Returns:
+            Volume as float 0-1
+        """
+        return self.current_volume
     
     def _audio_capture_worker(self) -> None:
-        """Background thread: capture audio from microphone."""
+        """Background thread: capture audio and measure volume."""
         try:
             import sounddevice as sd
+            import numpy as np
         except ImportError:
-            self.last_transcription = "Error: sounddevice not installed"
+            self.error_message = "Error: sounddevice/numpy not installed"
             self.is_recording = False
             return
         
         sample_rate = 16000
-        chunk_duration = 2  # Process 2-second chunks
-        chunk_size = sample_rate * chunk_duration
+        chunk_duration = 0.5  # Process 0.5-second chunks for faster volume updates
+        chunk_size = int(sample_rate * chunk_duration)
         
         try:
-            with sd.InputStream(samplerate=sample_rate, channels=1, blocksize=chunk_size):
+            with sd.InputStream(samplerate=sample_rate, channels=1, blocksize=chunk_size, dtype='float32'):
                 while self.is_recording:
                     # Read audio chunk
                     audio_chunk, _ = sd.read(frames=chunk_size, dtype='float32')
                     
                     if len(audio_chunk) > 0:
-                        self.audio_queue.put(audio_chunk)
+                        # Calculate RMS (volume level)
+                        rms = np.sqrt(np.mean(audio_chunk ** 2))
+                        self.current_volume = float(rms)
         except Exception as e:
-            self.last_transcription = f"Error: {str(e)}"
-    
-    def _transcription_worker(self) -> None:
-        """Background thread: transcribe audio chunks."""
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError:
-            self.last_transcription = "Error: faster-whisper not installed"
-            return
-        
-        while self.is_recording or not self.audio_queue.empty():
-            try:
-                # Get audio chunk with timeout
-                audio_chunk = self.audio_queue.get(timeout=1)
-            except queue.Empty:
-                continue
-            
-            try:
-                # Detect speaker
-                is_speech, speaker_id, speaker_changed = self.speaker_detector.detect(audio_chunk)
-                
-                if is_speech:
-                    # Transcribe
-                    segments, info = self.whisper_model.transcribe(audio_chunk, language="en")
-                    
-                    for segment in segments:
-                        text = segment.text.strip()
-                        if text:
-                            # Add speaker label if changed
-                            if speaker_changed or speaker_id != self.current_speaker:
-                                self.current_speaker = speaker_id
-                                speaker_prefix = f"\n**[Speaker {speaker_id}]**\n"
-                            else:
-                                speaker_prefix = " "
-                            
-                            # Save to file
-                            entry = speaker_prefix + text
-                            self.save_entry(entry)
-                            self.last_transcription = text
-            
-            except Exception as e:
-                self.last_transcription = f"Transcription error: {str(e)}"
+            self.error_message = f"Error: {str(e)}"

@@ -160,6 +160,25 @@ class Fieldream:
         """
         return len(text.split())
     
+    def render_volume_meter(self, volume: float, max_width: int = 10) -> str:
+        """Render a volume meter visualization.
+        
+        Args:
+            volume: Volume level 0-1
+            max_width: Width of the meter in characters
+            
+        Returns:
+            String like "[████░░░░]"
+        """
+        filled = int(volume * max_width)
+        empty = max_width - filled
+        meter = "[" + "█" * filled + "░" * empty + "]"
+        
+        # Convert volume to dB (0-1 -> -40 to 0 dB approximately)
+        db = max(-40, int(20 * (volume - 1)) if volume > 0 else -40)
+        
+        return f"{meter} {db}dB"
+    
     def save_active_entry(self) -> None:
         """Save the current input as an entry in the active ream."""
         if self.active_ream:
@@ -201,8 +220,16 @@ class Fieldream:
         else:
             footer_text = "Ctrl+O: Observation | Ctrl+I: Interview | Ctrl+S: Snapshot | ↑↓: Scroll | Ctrl+Q: Quit"
         
+        # Build status message with volume meter if interview is active
+        status_msg = self.status_message
+        if self.active_ream == "interview" and "interview" in self.reams:
+            ream = self.reams["interview"]
+            volume = ream.get_current_volume()
+            meter = self.render_volume_meter(volume)
+            status_msg = f"Recording... {meter}"
+        
         self.window_manager.draw_footer(footer_text)
-        self.window_manager.draw_status(self.status_message)
+        self.window_manager.draw_status(status_msg)
         self.window_manager.refresh_all()
 
     def run(self) -> None:
@@ -233,6 +260,7 @@ class Fieldream:
                         char_count = len(self.input_text)
                         word_count = self.count_words(self.input_text)
                         self.status_message = f"Typing: {char_count}/{word_count}"
+                    # Volume meter for interview will be handled in draw_dashboard
                     continue
                 
                 # Handle scrolling (available in any mode)
