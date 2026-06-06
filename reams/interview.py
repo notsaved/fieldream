@@ -27,7 +27,7 @@ class InterviewRea(BaseRea):
         self.audio_queue = queue.Queue()
         self.whisper_model = None
         self.last_transcription = ""
-        self.chunks_processed = 0  # For debugging
+        self.chunks_being_processed = 0  # Counter for chunks in processing
         self.transcription_status = "[silence]"  # [silence], [voice], [processing], [done]
     
     def start_session(self) -> None:
@@ -38,6 +38,7 @@ class InterviewRea(BaseRea):
         self.error_message = ""
         self.device_info = ""
         self.last_transcription = ""
+        self.chunks_being_processed = 0
         self.transcription_status = "[silence]"
         
         try:
@@ -222,8 +223,9 @@ class InterviewRea(BaseRea):
                 if chunk_rms < 0.001:
                     continue
                 
-                # Set status to processing
+                # Set status to processing and increment chunk counter
                 self.transcription_status = "[processing]"
+                self.chunks_being_processed += 1
                 
                 # Boost quiet audio (RMS around 0.06 is too quiet for Whisper)
                 # Target RMS of about 0.15-0.2 for good transcription
@@ -260,12 +262,14 @@ class InterviewRea(BaseRea):
                                 self.save_entry(text)
                                 self.last_transcription = text
                                 self.transcription_status = "[done]"
+                                self.chunks_being_processed = max(0, self.chunks_being_processed - 1)
                                 text_found = True
                                 break
                     
                     if not text_found:
                         self.last_transcription = f"[waiting...]"
                         self.transcription_status = "[silence]"
+                        self.chunks_being_processed = max(0, self.chunks_being_processed - 1)
                 finally:
                     # Clean up temp file
                     if os.path.exists(tmp_path):

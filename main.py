@@ -41,6 +41,9 @@ class Fieldream:
         self.active_reams = {"observation"}  # Observation always active
         self.input_text = ""  # Current input in observation ream
         
+        # Column navigation
+        self.selected_column = "observation"  # Currently selected column
+        
         # Scrolling
         self.scroll_offsets = {}  # Track scroll position for each ream
         
@@ -209,15 +212,17 @@ class Fieldream:
             self.get_ream_statuses(),
             ream_contents=ream_contents,
             input_text=self.input_text,
-            scroll_offsets=self.scroll_offsets
+            scroll_offsets=self.scroll_offsets,
+            selected_column=self.selected_column
         )
         
         # Footer text shows keyboard shortcuts
-        footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | ↑↓: Scroll | Ctrl+Q: Quit"
+        footer_text = "↑↓: Scroll | Ctrl+I: Interview | Ctrl+S: Snapshot"
         
         # Prepare status bar data
         volume = 0
         transcription_status = ""
+        chunks_processed = 0
         interview_active = False
         
         if "interview" in self.active_reams and "interview" in self.reams:
@@ -229,13 +234,15 @@ class Fieldream:
             else:
                 volume = ream.get_current_volume()
                 transcription_status = ream.transcription_status
+                chunks_processed = ream.chunks_being_processed
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(
             input_text=self.input_text,
             volume=volume,
             transcription_status=transcription_status,
-            interview_active=interview_active
+            interview_active=interview_active,
+            chunks_processed=chunks_processed
         )
         self.window_manager.refresh_all()
 
@@ -270,14 +277,28 @@ class Fieldream:
                     # Volume meter for interview will be handled in draw_dashboard
                     continue
                 
-                # Handle scrolling (available in any mode)
-                if ch == curses.KEY_UP:
-                    if "observation" in self.scroll_offsets:
-                        self.scroll_offsets["observation"] = max(0, self.scroll_offsets["observation"] - 3)
+                # Handle column navigation and scrolling
+                if ch == curses.KEY_LEFT:
+                    # Select previous column
+                    columns = ["observation", "interview", "snapshot"]
+                    current_idx = columns.index(self.selected_column)
+                    self.selected_column = columns[(current_idx - 1) % 3]
+                    continue
+                elif ch == curses.KEY_RIGHT:
+                    # Select next column
+                    columns = ["observation", "interview", "snapshot"]
+                    current_idx = columns.index(self.selected_column)
+                    self.selected_column = columns[(current_idx + 1) % 3]
+                    continue
+                elif ch == curses.KEY_UP:
+                    # Scroll selected column up
+                    if self.selected_column in self.scroll_offsets:
+                        self.scroll_offsets[self.selected_column] = max(0, self.scroll_offsets[self.selected_column] - 3)
                     continue
                 elif ch == curses.KEY_DOWN:
-                    if "observation" in self.scroll_offsets:
-                        self.scroll_offsets["observation"] += 3
+                    # Scroll selected column down
+                    if self.selected_column in self.scroll_offsets:
+                        self.scroll_offsets[self.selected_column] += 3
                     continue
                 
                 # Handle ream shortcuts
@@ -291,14 +312,15 @@ class Fieldream:
                     self.running = False
                     continue
                 
-                # Observation is always active - handle text input
-                if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
-                    self.save_active_entry()
-                elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
-                    if self.input_text:
-                        self.input_text = self.input_text[:-1]
-                elif 32 <= ch <= 126:  # Printable characters
-                    self.input_text += chr(ch)
+                # Observation is always active - handle text input only when selected
+                if self.selected_column == "observation":
+                    if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
+                        self.save_active_entry()
+                    elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
+                        if self.input_text:
+                            self.input_text = self.input_text[:-1]
+                    elif 32 <= ch <= 126:  # Printable characters
+                        self.input_text += chr(ch)
                 
             except Exception as e:
                 self.status_message = f"Error: {str(e)[:40]}"

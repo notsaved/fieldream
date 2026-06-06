@@ -55,7 +55,7 @@ class WindowManager:
         except:
             pass
 
-    def draw_status(self, input_text: str = "", volume: float = 0, transcription_status: str = "", interview_active: bool = False) -> None:
+    def draw_status(self, input_text: str = "", volume: float = 0, transcription_status: str = "", interview_active: bool = False, chunks_processed: int = 0) -> None:
         """Draw consolidated status bar at bottom.
         
         Args:
@@ -63,6 +63,7 @@ class WindowManager:
             volume: Current audio volume (0-1)
             transcription_status: Status message from Interview ([silence], [voice], [processing], [done])
             interview_active: Whether Interview ream is active
+            chunks_processed: Number of chunks currently being processed
         """
         try:
             status_y = self.height - 1
@@ -74,20 +75,23 @@ class WindowManager:
             char_count = len(text_to_count)
             word_count = len(text_to_count.split()) if text_to_count else 0
             
-            # Build status text
-            status_parts = [f" Words: {word_count} | Chars: {char_count}"]
+            # Build status text - simplified format: word_count/char_count
+            status_parts = [f" {word_count}/{char_count}"]
             
-            # Add audio meter and status if Interview is active
-            if interview_active:
-                # Convert volume (0-1) to meter visualization
-                meter_width = 8
-                filled = int(volume * meter_width)
-                meter = "█" * filled + "░" * (meter_width - filled)
-                
-                # Convert RMS to dB (rough approximation: 20*log10(rms))
-                db = 20 * (volume ** 0.5) - 30 if volume > 0 else -inf
-                
-                status_parts.append(f" | [{meter}] {db:+.0f}dB | {transcription_status}")
+            # Convert volume (0-1) to meter visualization
+            meter_width = 8
+            filled = int(volume * meter_width)
+            meter = "█" * filled + "░" * (meter_width - filled)
+            
+            # Convert RMS to dB (rough approximation: 20*log10(rms))
+            db = 20 * (volume ** 0.5) - 30 if volume > 0 else -inf
+            
+            # Always show meter and status
+            status_parts.append(f" | [{meter}] {db:+.0f}dB | {transcription_status}")
+            
+            # Add chunk count if processing
+            if chunks_processed > 0:
+                status_parts.append(f" ({chunks_processed})")
             
             status_text = "".join(status_parts)
             status_text = status_text[:self.width-1]
@@ -103,7 +107,7 @@ class WindowManager:
             pass
 
     def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
-                       input_text: str = "", scroll_offsets: Dict[str, int] = None) -> None:
+                       input_text: str = "", scroll_offsets: Dict[str, int] = None, selected_column: str = "observation") -> None:
         """Draw the dashboard."""
         if ream_contents is None:
             ream_contents = {}
@@ -136,12 +140,14 @@ class WindowManager:
                 col_x = col_idx * (col_width + 2)
                 key = ream.get("key")
                 is_active = ream.get("active", False)
+                is_selected = (key == selected_column)
                 
-                # Column header
+                # Column header - bold only if selected
                 status_char = "*" if is_active else " "
                 header = f"[{status_char}] {ream['name']}"[:col_width]
                 color = curses.color_pair(4) if is_active else curses.color_pair(5)
-                self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
+                attr = curses.A_BOLD if is_selected else 0
+                self.stdscr.addstr(row, col_x, header, color | attr)
                 
                 # Calculate input display lines first (only for Observation)
                 input_display_lines = []
