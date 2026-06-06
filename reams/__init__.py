@@ -2,6 +2,7 @@
 
 from reams.base import BaseRea
 from reams.observation import ObservationRea
-from reams.interview import InterviewRea
+
+# InterviewRea is imported in main.py with try/except for optional dependencies
 
 __all__ = ["BaseRea", "ObservationRea"]

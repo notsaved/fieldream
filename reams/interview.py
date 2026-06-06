@@ -3,18 +3,6 @@
 import threading
 import queue
 
-# Check for required dependencies
-try:
-    import numpy as np
-    from faster_whisper import WhisperModel
-    import sounddevice as sd
-except ImportError as e:
-    raise ImportError(
-        "Interview ream requires: faster-whisper, sounddevice, numpy\n"
-        "Install with: pip install faster-whisper sounddevice numpy\n"
-        f"Original error: {e}"
-    )
-
 from reams.base import BaseRea
 from utils.file_handler import FileHandler
 
@@ -37,7 +25,7 @@ class SpeakerDetector:
         self.current_speaker = 1
         self.last_speaker = 0
     
-    def detect(self, audio_chunk: np.ndarray) -> tuple:
+    def detect(self, audio_chunk) -> tuple:
         """Detect if speaker changed.
         
         Args:
@@ -46,6 +34,8 @@ class SpeakerDetector:
         Returns:
             Tuple of (is_speech, speaker_id, speaker_changed)
         """
+        import numpy as np
+        
         # Calculate RMS (volume)
         rms = np.sqrt(np.mean(audio_chunk ** 2))
         chunk_duration = len(audio_chunk) / self.sample_rate
@@ -94,9 +84,22 @@ class InterviewRea(BaseRea):
         self.is_recording = True
         self.current_speaker = 1
         
-        # Initialize Whisper model (base is good for Pi)
-        if self.whisper_model is None:
-            self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        try:
+            # Lazy import - only when actually used
+            from faster_whisper import WhisperModel
+        except ImportError:
+            self.last_transcription = "Error: faster-whisper not installed"
+            self.is_recording = False
+            return
+        
+        try:
+            # Initialize Whisper model (base is good for Pi)
+            if self.whisper_model is None:
+                self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        except Exception as e:
+            self.last_transcription = f"Error loading model: {str(e)}"
+            self.is_recording = False
+            return
         
         # Initialize speaker detector
         self.speaker_detector = SpeakerDetector()
@@ -132,6 +135,13 @@ class InterviewRea(BaseRea):
     
     def _audio_capture_worker(self) -> None:
         """Background thread: capture audio from microphone."""
+        try:
+            import sounddevice as sd
+        except ImportError:
+            self.last_transcription = "Error: sounddevice not installed"
+            self.is_recording = False
+            return
+        
         sample_rate = 16000
         chunk_duration = 2  # Process 2-second chunks
         chunk_size = sample_rate * chunk_duration
@@ -149,6 +159,12 @@ class InterviewRea(BaseRea):
     
     def _transcription_worker(self) -> None:
         """Background thread: transcribe audio chunks."""
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError:
+            self.last_transcription = "Error: faster-whisper not installed"
+            return
+        
         while self.is_recording or not self.audio_queue.empty():
             try:
                 # Get audio chunk with timeout
