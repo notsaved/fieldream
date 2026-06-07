@@ -117,6 +117,9 @@ class SnapshotRea(BaseRea):
     
     def start_session(self) -> None:
         """Start a new snapshot session (webcam capture)."""
+        from debug import log
+        log("SnapshotRea.start_session: called")
+        
         super().start_session()
         self.is_recording = True
         self.snapshot_count = 0
@@ -124,33 +127,44 @@ class SnapshotRea(BaseRea):
         self.device_info = "Initialized (ready to capture)"
         self.is_processing = False
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
+        log("SnapshotRea.start_session: base init done")
         
         try:
             import cv2
         except ImportError as e:
+            log(f"SnapshotRea: OpenCV import failed: {e}")
             self.error_message = f"Missing: opencv-python"
             self.is_recording = False
             return
         
+        log("SnapshotRea.start_session: creating threads")
         # Start threads in background (daemon mode so they don't block shutdown)
         try:
             self.capture_thread = threading.Thread(target=self._capture_scheduler, daemon=True, name="SnapshotCapture")
             self.capture_thread.start()
+            log("SnapshotRea.start_session: capture thread started")
             
             self.process_thread = threading.Thread(target=self._process_worker, daemon=True, name="SnapshotProcess")
             self.process_thread.start()
+            log("SnapshotRea.start_session: process thread started")
             
             self.device_info = "Threads started"
         except Exception as e:
+            log(f"SnapshotRea: Thread error: {e}")
             self.error_message = f"Thread error: {str(e)[:30]}"
             self.is_recording = False
+        log("SnapshotRea.start_session: done")
     
     def _capture_scheduler(self) -> None:
         """Background thread: schedule and capture images."""
+        from debug import log
+        log("SnapshotRea._capture_scheduler: thread started")
+        
         try:
             import cv2
         except ImportError:
             self.error_message = "OpenCV not available"
+            log("SnapshotRea._capture_scheduler: OpenCV import failed")
             return
         
         while self.is_recording:
@@ -163,6 +177,7 @@ class SnapshotRea(BaseRea):
                 # Check if it's time for a snapshot (and not already processing)
                 now = datetime.now()
                 if now >= self.next_snapshot_time and not self.is_processing:
+                    log(f"SnapshotRea._capture_scheduler: capturing snapshot")
                     try:
                         # Open camera
                         cap = cv2.VideoCapture(0)
@@ -170,6 +185,7 @@ class SnapshotRea(BaseRea):
                         
                         if not cap.isOpened():
                             self.error_message = "Camera unavailable"
+                            log("SnapshotRea: Camera not opened")
                         else:
                             ret, frame = cap.read()
                             cap.release()
@@ -179,19 +195,23 @@ class SnapshotRea(BaseRea):
                                 self.is_processing = True
                                 self.snapshot_count += 1
                                 self.device_info = f"Snapshot #{self.snapshot_count} captured"
+                                log(f"SnapshotRea: Snapshot #{self.snapshot_count} queued")
                             else:
                                 self.error_message = "Failed to read frame"
+                                log("SnapshotRea: Frame read failed")
                         
                         # Schedule next snapshot
                         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
                     
                     except Exception as e:
                         self.error_message = f"Capture: {str(e)[:25]}"
+                        log(f"SnapshotRea._capture_scheduler error: {e}")
                 
                 time.sleep(1)
                 
             except Exception as e:
                 self.error_message = f"Scheduler: {str(e)[:25]}"
+                log(f"SnapshotRea._capture_scheduler outer error: {e}")
                 time.sleep(1)
     
     def _process_worker(self) -> None:
