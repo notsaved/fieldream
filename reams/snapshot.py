@@ -196,12 +196,20 @@ class SnapshotRea(BaseRea):
             # Load image
             image = Image.open(image_path)
             
-            # Load model (should be cached after first load)
-            processor = AutoProcessor.from_pretrained("llava-hf/llava-1.5-7b-hf")
-            model = LlavaForConditionalGeneration.from_pretrained(
-                "llava-hf/llava-1.5-7b-hf",
-                device_map="auto"
-            )
+            # Try to load model from cache only (don't download)
+            try:
+                processor = AutoProcessor.from_pretrained(
+                    "llava-hf/llava-1.5-7b-hf",
+                    local_files_only=True
+                )
+                model = LlavaForConditionalGeneration.from_pretrained(
+                    "llava-hf/llava-1.5-7b-hf",
+                    device_map="auto",
+                    local_files_only=True
+                )
+            except Exception as e:
+                self.error_message = "LLaVA model not cached - download first"
+                return
             
             # Generate prompt
             prompt = "Describe what you see in this image in one sentence."
