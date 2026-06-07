@@ -43,6 +43,14 @@ class SnapshotRea(BaseRea):
         # Load prompt from file
         self.ethnographic_prompt = self._load_prompt()
     
+    def get_help_text(self) -> str:
+        """Get help text for snapshot ream."""
+        return "Ctrl+P: Capture now | ↑↓: Change interval (5-30 min)"
+    
+    def handle_input(self, input_data: str) -> None:
+        """Handle input data (not used for snapshot)."""
+        pass
+    
     def _load_prompt(self) -> str:
         """Load ethnographic prompt from file."""
         try:
