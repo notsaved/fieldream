@@ -79,7 +79,7 @@ class SnapshotRea(BaseRea):
         self.snapshot_count = 0
         self.describing_count = 0
         self.error_message = ""
-        self.device_info = "Init..."
+        self.device_info = ""  # Will show timer
         self.content = ""
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
         
@@ -95,8 +95,6 @@ class SnapshotRea(BaseRea):
         
         self.describe_thread = threading.Thread(target=self._describe_loop, daemon=True)
         self.describe_thread.start()
-        
-        self.device_info = "Ready"
     
     def end_session(self) -> None:
         """End the session."""
@@ -111,10 +109,11 @@ class SnapshotRea(BaseRea):
         """Background thread: capture images on schedule."""
         while self.is_recording:
             try:
-                # Update timer
+                # Update timer display
                 if self.next_snapshot_time:
                     delta = self.next_snapshot_time - datetime.now()
                     self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
+                    self.device_info = f"Next: {self.minutes_until_next}m"
                 
                 # Check for manual trigger (no cooldown) or scheduled time
                 should_capture = (
@@ -125,6 +124,7 @@ class SnapshotRea(BaseRea):
                 if should_capture:
                     filepath = self._do_capture()
                     if filepath:
+                        self.device_info = "[snap!]"
                         # Queue image for description
                         with self.describe_lock:
                             self.pending_images.append(filepath)
@@ -132,7 +132,7 @@ class SnapshotRea(BaseRea):
                     self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
                     self.manual_trigger_pending = False
                 
-                time.sleep(1)
+                time.sleep(0.2)  # Check more frequently for manual triggers
             except:
                 pass
     
@@ -180,7 +180,6 @@ class SnapshotRea(BaseRea):
             
             cv2.imwrite(str(filepath), frame)
             self.snapshot_count += 1
-            self.device_info = f"Captured #{self.snapshot_count} (cam{camera_index})"
             self.error_message = ""
             return str(filepath)
         
@@ -190,8 +189,37 @@ class SnapshotRea(BaseRea):
     
     def _describe_loop(self) -> None:
         """Background thread: generate descriptions for pending images."""
+        # Load model ONCE at start of thread (not for each image)
+        processor = None
+        model = None
+        device = None
+        model_error = False
+        
+        try:
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            import torch
+            
+            processor = BlipProcessor.from_pretrained(
+                'Salesforce/blip-image-captioning-base',
+                local_files_only=True
+            )
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = BlipForConditionalGeneration.from_pretrained(
+                'Salesforce/blip-image-captioning-base',
+                device_map=device,
+                local_files_only=True
+            )
+        except Exception as e:
+            self.error_message = f"Model error: {str(e)[:15]}"
+            model_error = True
+        
+        # Now process images (model stays loaded in memory)
         while self.is_recording:
             try:
+                if model_error:
+                    time.sleep(1)
+                    continue
+                
                 # Check if there are images to describe
                 with self.describe_lock:
                     if not self.pending_images:
@@ -200,52 +228,51 @@ class SnapshotRea(BaseRea):
                     filepath = self.pending_images.pop(0)
                 
                 self.describing_count += 1
-                self._generate_description(filepath)
+                self.device_info = "processing"
+                self._generate_description(filepath, processor, model, device)
                 self.describing_count = max(0, self.describing_count - 1)
+                
+                # Reset to timer display
+                if self.next_snapshot_time:
+                    delta = self.next_snapshot_time - datetime.now()
+                    self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
+                    self.device_info = f"Next: {self.minutes_until_next}m"
             
-            except:
+            except Exception as e:
+                self.error_message = f"Error: {str(e)[:20]}"
                 self.describing_count = max(0, self.describing_count - 1)
                 time.sleep(1)
     
-    def _generate_description(self, image_path: str) -> None:
-        """Generate ethnographic description using BLIP image captioning (offline only)."""
+    def _generate_description(self, image_path: str, processor, model, device) -> None:
+        """Generate detailed description using pre-loaded BLIP model (reused across images)."""
         try:
-            from transformers import BlipProcessor, BlipForConditionalGeneration
             from PIL import Image
-            import torch
             
-            # Load image
+            # Load image only
             image = Image.open(image_path)
             
-            # Load BLIP processor and model from cache ONLY (no downloads)
-            try:
-                processor = BlipProcessor.from_pretrained(
-                    'Salesforce/blip-image-captioning-base',
-                    local_files_only=True  # CRITICAL: offline mode
-                )
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                model = BlipForConditionalGeneration.from_pretrained(
-                    'Salesforce/blip-image-captioning-base',
-                    device_map=device,
-                    local_files_only=True  # CRITICAL: offline mode
-                )
-            except Exception as e:
-                self.error_message = f"Model not cached: {str(e)[:15]}"
-                # Save error to file
-                entry = f"\n**{datetime.now().strftime('%H:%M:%S')}** - {Path(image_path).name}\n[Model not cached. Run setup_blip.sh first]\n"
-                self.save_entry(entry)
-                self.content += entry
-                return
-            
-            # Generate caption (BLIP works best without conditional text)
-            # Just let it generate the most detailed description
+            # Use conditional text to encourage detailed descriptions
+            conditional_text = "Describe in detail:"
             inputs = processor(
                 image, 
+                text=conditional_text,
                 return_tensors="pt"
             ).to(device)
             
-            out = model.generate(**inputs, max_length=100)
+            # Generate with parameters for longer, more detailed output
+            out = model.generate(
+                **inputs,
+                max_length=200,          # Increased from 100
+                min_length=50,           # Force at least 50 tokens
+                length_penalty=2.0,      # Encourage longer sequences
+                num_beams=4,             # Better quality (more computational)
+                temperature=0.7,         # More varied output
+            )
             description = processor.decode(out[0], skip_special_tokens=True)
+            
+            # Clean up - remove the conditional text if it appears
+            if description.startswith(conditional_text):
+                description = description[len(conditional_text):].strip()
             
             # Create formatted entry for snapshot notes
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -267,12 +294,10 @@ class SnapshotRea(BaseRea):
             with open(json_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             
-            self.device_info = f"Captured #{self.snapshot_count}, described"
             self.error_message = ""
         
         except Exception as e:
             self.error_message = f"Describe: {str(e)[:20]}"
-            # Log error to file for debugging
             try:
                 entry = f"\n**{datetime.now().strftime('%H:%M:%S')}** - {Path(image_path).name}\n[Error: {self.error_message}]\n"
                 self.save_entry(entry)
