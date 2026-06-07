@@ -27,7 +27,7 @@ class SnapshotRea(BaseRea):
         self.current_interval_idx = 1  # Start with 10 minutes
         self.next_snapshot_time = None
         
-        # Status
+        # Status - MUST all be initialized to avoid AttributeError
         self.error_message = ""
         self.device_info = ""
         self.minutes_until_next = 0
@@ -71,25 +71,39 @@ class SnapshotRea(BaseRea):
     
     def start_session(self) -> None:
         """Start a new snapshot session (webcam capture)."""
-        super().start_session()
-        self.is_recording = True
-        self.snapshot_count = 0
-        self.error_message = ""
-        self.device_info = "Initialized"
-        self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
-        
-        # Start capture thread (daemon mode)
         try:
-            self.capture_thread = threading.Thread(
-                target=self._capture_loop, 
-                daemon=True, 
-                name="SnapshotCapture"
-            )
-            self.capture_thread.start()
-            self.device_info = "Ready"
+            # Initialize all attributes first (safe)
+            self.is_recording = True
+            self.snapshot_count = 0
+            self.error_message = ""
+            self.device_info = "Starting..."
+            self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
+            self.minutes_until_next = self.get_current_interval()
+            
+            # Then call super.start_session() which creates files (may fail)
+            try:
+                super().start_session()
+            except Exception as e:
+                self.error_message = f"File init: {str(e)[:20]}"
+                self.device_info = "File error"
+            
+            # Start capture thread (daemon mode) - non-blocking
+            try:
+                self.capture_thread = threading.Thread(
+                    target=self._capture_loop, 
+                    daemon=True, 
+                    name="SnapshotCapture"
+                )
+                self.capture_thread.start()
+                self.device_info = "Ready"
+            except Exception as e:
+                self.error_message = f"Thread: {str(e)[:20]}"
+                self.is_recording = False
         except Exception as e:
-            self.error_message = f"Thread error: {str(e)[:30]}"
+            # Catch-all - never crash the UI thread
+            self.error_message = f"Init: {str(e)[:20]}"
             self.is_recording = False
+            self.device_info = "Failed"
     
     def end_session(self) -> None:
         """End the session."""

@@ -138,85 +138,81 @@ class WindowManager:
             self.stdscr.addstr(2, 0, "=" * (self.width - 1))
             
             # Draw 3 columns
-            col_width = (self.width - 4) // 3
+            col_width = max(1, (self.width - 4) // 3)
             row = 3
             
             for col_idx, ream in enumerate(reams):
-                if col_idx >= 3:
-                    break
-                if row >= self.height - 2:
-                    break
-                
-                col_x = col_idx * (col_width + 2)
-                key = ream.get("key")
-                is_active = ream.get("active", False)
-                
-                # Column header
-                status_char = "*" if is_active else " "
-                header = f"[{status_char}] {ream['name']}"[:col_width]
-                color = curses.color_pair(4) if is_active else curses.color_pair(5)
-                self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
-                
-                # Calculate input display lines first (only for Observation)
-                input_display_lines = []
-                if key == "observation":
-                    if input_text:
-                        input_str = "> " + input_text
-                    else:
-                        input_str = "> "
-                    
-                    while len(input_str) > col_width:
-                        input_display_lines.append(input_str[:col_width])
-                        input_str = input_str[col_width:]
-                    if input_str:
-                        input_display_lines.append(input_str)
-                
-                # Calculate content boundary (input grows upward from height-3)
-                num_input_lines = len(input_display_lines)
-                max_content_row = self.height - 3 - num_input_lines
-                display_height = max_content_row - row - 1
-                
-                # Wrap and display content lines
-                lines = ream_contents.get(key, "").split("\n") if key in ream_contents else []
-                
-                # Convert lines to wrapped lines
-                wrapped_lines = []
-                for line in lines:
-                    while len(line) > col_width:
-                        wrapped_lines.append(line[:col_width])
-                        line = line[col_width:]
-                    wrapped_lines.append(line)
-                
-                # Auto-scroll to bottom if content grew
-                total_wrapped = len(wrapped_lines)
-                if total_wrapped > display_height:
-                    # Show the last display_height lines
-                    offset = total_wrapped - display_height
-                else:
-                    offset = 0
-                
-                # Display wrapped content lines (from row+1 onwards, up to max_content_row)
-                display_row = 0
-                for i in range(offset, len(wrapped_lines)):
-                    current_row = row + 1 + display_row
-                    if current_row >= max_content_row:
+                try:
+                    if col_idx >= 3:
+                        break
+                    if row >= self.height - 2:
                         break
                     
-                    display_line = wrapped_lines[i]
-                    self.stdscr.addstr(current_row, col_x, display_line[:col_width])
-                    display_row += 1
-                
-                # Display input lines if Observation (grows upward from height-3)
-                # Display input lines if Observation (grows upward from height-3)
-                if key == "observation" and input_display_lines:
-                    input_start_row = self.height - 3 - num_input_lines
-                    for idx, input_line in enumerate(input_display_lines):
-                        current_row = input_start_row + idx
-                        if current_row >= self.height - 2:
+                    col_x = col_idx * (col_width + 2)
+                    key = ream.get("key")
+                    is_active = ream.get("active", False)
+                    
+                    # Column header
+                    status_char = "*" if is_active else " "
+                    header = f"[{status_char}] {ream['name']}"[:col_width]
+                    color = curses.color_pair(4) if is_active else curses.color_pair(5)
+                    self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
+                    
+                    # Calculate input display lines (only for Observation)
+                    input_display_lines = []
+                    if key == "observation":
+                        input_str = ("> " + input_text) if input_text else "> "
+                        count = 0
+                        while len(input_str) > col_width and count < 100:
+                            input_display_lines.append(input_str[:col_width])
+                            input_str = input_str[col_width:]
+                            count += 1
+                        if input_str:
+                            input_display_lines.append(input_str)
+                    
+                    # Calculate content boundary
+                    num_input_lines = len(input_display_lines)
+                    max_content_row = self.height - 3 - num_input_lines
+                    display_height = max(1, max_content_row - row - 1)
+                    
+                    # Get and wrap content lines
+                    lines = ream_contents.get(key, "").split("\n")
+                    wrapped_lines = []
+                    for line in lines:
+                        count = 0
+                        while len(line) > col_width and count < 100:
+                            wrapped_lines.append(line[:col_width])
+                            line = line[col_width:]
+                            count += 1
+                        wrapped_lines.append(line)
+                    
+                    # Auto-scroll to bottom
+                    total_wrapped = len(wrapped_lines)
+                    offset = max(0, total_wrapped - display_height)
+                    
+                    # Display content
+                    display_row = 0
+                    for i in range(offset, min(offset + display_height, len(wrapped_lines))):
+                        current_row = row + 1 + display_row
+                        if current_row >= max_content_row:
                             break
-                        
-                        self.stdscr.addstr(current_row, col_x, input_line[:col_width], curses.color_pair(3))
+                        if i < len(wrapped_lines):
+                            self.stdscr.addstr(current_row, col_x, wrapped_lines[i][:col_width])
+                        display_row += 1
+                    
+                    # Display input lines if Observation
+                    if key == "observation" and input_display_lines:
+                        input_start_row = self.height - 3 - num_input_lines
+                        for idx, input_line in enumerate(input_display_lines):
+                            current_row = input_start_row + idx
+                            if current_row >= self.height - 2:
+                                break
+                            self.stdscr.addstr(current_row, col_x, input_line[:col_width], curses.color_pair(3))
+                
+                except Exception:
+                    # Skip this column if rendering fails
+                    pass
             
             self.stdscr.refresh()
-        except Exception as e:
+        except Exception:
             pass

@@ -220,72 +220,85 @@ class Fieldream:
 
     def draw_dashboard(self) -> None:
         """Draw the dashboard view."""
-        self.window_manager.draw_header("Fieldream", "Dashboard")
-        
-        ream_contents = self.get_ream_contents()
-        
-        self.window_manager.draw_dashboard(
-            self.session_name, 
-            self.get_ream_statuses(),
-            ream_contents=ream_contents,
-            input_text=self.input_text,
-            scroll_offsets=self.scroll_offsets
-        )
-        
-        # Footer text shows keyboard shortcuts
-        footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
-        
-        # Prepare status bar data
-        volume = 0
-        transcription_status = ""
-        queue_size = 0
-        processing_time = 0.0
-        interview_active = False
-        
-        # Snapshot status
-        snapshot_interval = 0
-        snapshot_countdown = 0
-        snapshot_active = False
-        
-        if "interview" in self.active_reams and "interview" in self.reams:
+        try:
+            self.window_manager.draw_header("Fieldream", "Dashboard")
+            
+            ream_contents = self.get_ream_contents()
+            
+            self.window_manager.draw_dashboard(
+                self.session_name, 
+                self.get_ream_statuses(),
+                ream_contents=ream_contents,
+                input_text=self.input_text,
+                scroll_offsets=self.scroll_offsets
+            )
+            
+            # Footer text shows keyboard shortcuts
+            footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
+            
+            # Prepare status bar data
+            volume = 0
+            transcription_status = ""
+            queue_size = 0
+            processing_time = 0.0
+            interview_active = False
+            
+            # Snapshot status
+            snapshot_interval = 0
+            snapshot_countdown = 0
+            snapshot_active = False
+            
+            if "interview" in self.active_reams and "interview" in self.reams:
+                try:
+                    ream = self.reams["interview"]
+                    interview_active = True
+                    # Show error if present
+                    if hasattr(ream, 'error_message') and ream.error_message:
+                        transcription_status = f"Error: {ream.error_message[:20]}"
+                    else:
+                        if hasattr(ream, 'get_current_volume'):
+                            volume = ream.get_current_volume()
+                        if hasattr(ream, 'transcription_status'):
+                            transcription_status = ream.transcription_status
+                        if hasattr(ream, 'audio_queue'):
+                            queue_size = ream.audio_queue.qsize()
+                        if hasattr(ream, 'last_chunk_duration'):
+                            processing_time = ream.last_chunk_duration
+                except Exception:
+                    # Interview ream error - don't crash, just skip
+                    interview_active = False
+            
+            if "snapshot" in self.active_reams and "snapshot" in self.reams:
+                try:
+                    ream = self.reams["snapshot"]
+                    snapshot_active = True
+                    if hasattr(ream, 'get_current_interval'):
+                        snapshot_interval = ream.get_current_interval()
+                    if hasattr(ream, 'minutes_until_next'):
+                        snapshot_countdown = ream.minutes_until_next
+                except Exception:
+                    # Snapshot ream error - don't crash, just skip
+                    snapshot_active = False
+            
+            self.window_manager.draw_footer(footer_text)
+            self.window_manager.draw_status(
+                input_text=self.input_text,
+                volume=volume,
+                transcription_status=transcription_status,
+                interview_active=interview_active,
+                queue_size=queue_size,
+                processing_time=processing_time,
+                snapshot_active=snapshot_active,
+                snapshot_interval=snapshot_interval,
+                snapshot_countdown=snapshot_countdown
+            )
+            self.window_manager.refresh_all()
+        except Exception:
+            # Never let draw_dashboard crash the app
             try:
-                ream = self.reams["interview"]
-                interview_active = True
-                # Show error if present
-                if ream.error_message:
-                    transcription_status = f"Error: {ream.error_message[:20]}"
-                else:
-                    volume = ream.get_current_volume()
-                    transcription_status = ream.transcription_status
-                    queue_size = ream.audio_queue.qsize()
-                    processing_time = ream.last_chunk_duration
-            except Exception:
-                # Interview ream error - don't crash, just skip
-                interview_active = False
-        
-        if "snapshot" in self.active_reams and "snapshot" in self.reams:
-            try:
-                ream = self.reams["snapshot"]
-                snapshot_active = True
-                snapshot_interval = ream.get_current_interval()
-                snapshot_countdown = ream.minutes_until_next
-            except Exception:
-                # Snapshot ream error - don't crash, just skip
-                snapshot_active = False
-        
-        self.window_manager.draw_footer(footer_text)
-        self.window_manager.draw_status(
-            input_text=self.input_text,
-            volume=volume,
-            transcription_status=transcription_status,
-            interview_active=interview_active,
-            queue_size=queue_size,
-            processing_time=processing_time,
-            snapshot_active=snapshot_active,
-            snapshot_interval=snapshot_interval,
-            snapshot_countdown=snapshot_countdown
-        )
-        self.window_manager.refresh_all()
+                self.window_manager.refresh_all()
+            except:
+                pass
 
     def run(self) -> None:
         """Main application loop."""
@@ -305,7 +318,16 @@ class Fieldream:
                 # Add small delay to prevent rapid flashing
                 time.sleep(0.05)
                 
-                self.draw_dashboard()
+                # Draw dashboard with safety - use a fresh try/except
+                try:
+                    self.draw_dashboard()
+                except Exception as e:
+                    # Dashboard error - try to display but keep going
+                    self.status_message = str(e)[:40]
+                    try:
+                        self.window_manager.refresh_all()
+                    except:
+                        pass
                 
                 ch = self.stdscr.getch()
                 
