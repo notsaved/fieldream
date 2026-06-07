@@ -234,7 +234,7 @@ class Fieldream:
             )
             
             # Footer text shows keyboard shortcuts
-            footer_text = "Ctrl+I: Interview | Ctrl+N: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
+            footer_text = "Ctrl+I: Interview | Ctrl+P: Snapshot | Alt+P: Capture | ↑↓: Interval"
             
             # Prepare status bar data
             volume = 0
@@ -339,12 +339,16 @@ class Fieldream:
                 if ch == 9:  # Ctrl+I - Toggle Interview
                     self.toggle_ream("interview")
                     continue
-                elif ch == 14:  # Ctrl+N - Toggle Snapshot
+                elif ch == 16:  # Ctrl+P - Toggle Snapshot
                     self.toggle_ream("snapshot")
                     continue
-                elif ch == 16:  # Ctrl+P - Manual snapshot trigger
-                    if "snapshot" in self.reams and "snapshot" in self.active_reams:
-                        self.reams["snapshot"].trigger_manual_snapshot()
+                elif ch == 27:  # ESC - Could be Alt+P for manual snapshot
+                    # Read next character to check for Alt+P
+                    self.stdscr.nodelay(True)
+                    next_ch = self.stdscr.getch()
+                    if next_ch == ord('p') or next_ch == ord('P'):  # Alt+P
+                        if "snapshot" in self.reams and "snapshot" in self.active_reams:
+                            self.reams["snapshot"].trigger_manual_snapshot()
                     continue
                 elif ch == 17:  # Ctrl+Q - Quit
                     self.running = False
