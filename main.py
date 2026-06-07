@@ -125,11 +125,18 @@ class Fieldream:
         """
         contents = {}
         for key, ream in self.reams.items():
-            if ream.session_started and ream.current_file:
-                try:
-                    with open(ream.current_file, "r", encoding="utf-8") as f:
-                        contents[key] = f.read()
-                except:
+            if ream.session_started:
+                # Try to get in-memory content first (for snapshot descriptions)
+                if hasattr(ream, 'content') and ream.content:
+                    contents[key] = ream.content
+                # Otherwise read from file
+                elif ream.current_file:
+                    try:
+                        with open(ream.current_file, "r", encoding="utf-8") as f:
+                            contents[key] = f.read()
+                    except:
+                        contents[key] = ""
+                else:
                     contents[key] = ""
             else:
                 contents[key] = ""

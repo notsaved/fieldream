@@ -1,4 +1,4 @@
-"""Snapshot ream - Simple webcam image capture with LLaVA descriptions."""
+"""Snapshot ream - Webcam image capture with ethnographic descriptions using BLIP."""
 
 import threading
 import time
@@ -8,10 +8,11 @@ from pathlib import Path
 
 from reams.base import BaseRea
 from utils.file_handler import FileHandler
+import config
 
 
 class SnapshotRea(BaseRea):
-    """Snapshot ream for webcam image capture with AI descriptions."""
+    """Snapshot ream for webcam image capture with AI ethnographic descriptions."""
     
     def __init__(self, file_handler: FileHandler):
         """Initialize snapshot ream.
@@ -27,7 +28,8 @@ class SnapshotRea(BaseRea):
         self.device_info = ""
         self.minutes_until_next = 0
         self.snapshot_count = 0
-        self.describing_count = 0  # Number of images being described
+        self.describing_count = 0
+        self.content = ""  # Accumulated descriptions for display
         
         # Interval management
         self.interval_options = [5, 10, 15, 20, 30]  # minutes
@@ -36,7 +38,7 @@ class SnapshotRea(BaseRea):
         
         self.capture_thread = None
         self.describe_thread = None
-        self.pending_images = []  # Queue of image paths needing descriptions
+        self.pending_images = []
         self.describe_lock = threading.Lock()
     
     def get_help_text(self) -> str:
@@ -48,11 +50,7 @@ class SnapshotRea(BaseRea):
         pass
     
     def set_interval(self, direction: str) -> None:
-        """Change snapshot interval.
-        
-        Args:
-            direction: "up" or "down" to cycle through intervals
-        """
+        """Change snapshot interval."""
         if direction == "up":
             self.current_interval_idx = (self.current_interval_idx + 1) % len(self.interval_options)
         elif direction == "down":
@@ -75,22 +73,23 @@ class SnapshotRea(BaseRea):
             self.next_snapshot_time = datetime.now()
     
     def start_session(self) -> None:
-        """Start snapshot session. MINIMAL - no blocking operations."""
-        # Step 1: Set flags (super fast)
+        """Start snapshot session."""
+        # Step 1: Set flags
         self.is_recording = True
         self.snapshot_count = 0
         self.describing_count = 0
         self.error_message = ""
         self.device_info = "Init..."
+        self.content = ""
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
         
-        # Step 2: Initialize file handler (should be fast)
+        # Step 2: Initialize file handler
         try:
             super().start_session()
         except Exception as e:
             self.error_message = f"File error: {str(e)[:15]}"
         
-        # Step 3: Start background threads (non-blocking daemon)
+        # Step 3: Start background threads
         self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.capture_thread.start()
         
@@ -108,7 +107,7 @@ class SnapshotRea(BaseRea):
             pass
     
     def _capture_loop(self) -> None:
-        """Background thread: capture images on schedule. SAFE - all errors caught."""
+        """Background thread: capture images on schedule."""
         while self.is_recording:
             try:
                 # Update timer
@@ -141,7 +140,7 @@ class SnapshotRea(BaseRea):
             
             # Try to find available camera
             camera_index = None
-            for i in range(0, 5):  # Try /dev/video0 through /dev/video4
+            for i in range(0, 5):
                 cap = cv2.VideoCapture(i)
                 if cap.isOpened():
                     camera_index = i
@@ -149,13 +148,13 @@ class SnapshotRea(BaseRea):
                     break
             
             if camera_index is None:
-                self.error_message = "No camera found (try libcamera)"
+                self.error_message = "No camera found"
                 return None
             
             # Open camera
             cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():
-                self.error_message = f"Camera {camera_index} failed to open"
+                self.error_message = f"Camera {camera_index} failed"
                 return None
             
             # Read frame
@@ -201,7 +200,7 @@ class SnapshotRea(BaseRea):
                 time.sleep(1)
     
     def _generate_description(self, image_path: str) -> None:
-        """Generate description using BLIP image captioning model."""
+        """Generate ethnographic description using BLIP image captioning."""
         try:
             from transformers import BlipProcessor, BlipForConditionalGeneration
             from PIL import Image
@@ -210,7 +209,7 @@ class SnapshotRea(BaseRea):
             # Load image
             image = Image.open(image_path)
             
-            # Load BLIP processor and model (cached from setup_blip.sh)
+            # Load BLIP processor and model
             processor = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-base')
             device = "cuda" if torch.cuda.is_available() else "cpu"
             model = BlipForConditionalGeneration.from_pretrained(
@@ -218,21 +217,34 @@ class SnapshotRea(BaseRea):
                 device_map=device
             )
             
-            # Generate caption
-            inputs = processor(image, return_tensors="pt").to(device)
-            out = model.generate(**inputs, max_length=50)
-            caption = processor.decode(out[0], skip_special_tokens=True)
+            # Generate ethnographic caption using config prompt
+            inputs = processor(
+                image, 
+                text=config.ETHNOGRAPHIC_IMAGE_PROMPT,
+                return_tensors="pt"
+            ).to(device)
+            out = model.generate(**inputs, max_length=150)
+            description = processor.decode(out[0], skip_special_tokens=True)
             
-            # Save description as JSON metadata
+            # Create formatted entry for snapshot notes
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            filename = Path(image_path).name
+            entry = f"\n**{timestamp}** - {filename}\n{description}\n"
+            
+            # Save to snapshot notes using BaseRea.save_entry()
+            self.save_entry(entry)
+            
+            # Update in-memory content for display
+            self.content += entry
+            
+            # Save image metadata JSON
             image_base = Path(image_path).stem
             json_path = Path(image_path).parent / f"{image_base}.json"
-            
             metadata = {
                 "timestamp": datetime.now().isoformat(),
-                "image_file": Path(image_path).name,
-                "description": caption
+                "image_file": filename,
+                "description": description
             }
-            
             with open(json_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             
