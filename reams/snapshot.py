@@ -72,19 +72,23 @@ class SnapshotRea(BaseRea):
             import torch
             
             model_name = "llava-hf/llava-1.5-7b-hf"
-            self.device_info = "Loading model (first snapshot only)..."
-            
+            self.device_info = "Loading processor..."
             self.processor = AutoProcessor.from_pretrained(model_name)
+            
+            self.device_info = "Loading vision model..."
             self.vision_model = LlavaForConditionalGeneration.from_pretrained(
                 model_name,
                 device_map="cpu",
                 load_in_8bit=True,
                 torch_dtype=torch.float32
             )
-            self.device_info = "Model loaded"
+            self.device_info = "Model ready"
+        except ImportError as e:
+            self.error_message = f"Import error: {str(e)[:30]}"
+            self.device_info = "Failed: missing dependency"
         except Exception as e:
-            self.error_message = f"Model load failed: {str(e)[:40]}"
-            self.vision_model = None
+            self.error_message = f"Load failed: {str(e)[:30]}"
+            self.device_info = "Failed: load error"
     
     def set_interval(self, direction: str) -> None:
         """Change snapshot interval.
@@ -117,7 +121,7 @@ class SnapshotRea(BaseRea):
         self.is_recording = True
         self.snapshot_count = 0
         self.error_message = ""
-        self.device_info = "Ready (model loads on first snapshot)"
+        self.device_info = "Initialized (ready to capture)"
         self.is_processing = False
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
         
@@ -128,15 +132,18 @@ class SnapshotRea(BaseRea):
             self.is_recording = False
             return
         
-        # Don't load model yet - will lazy-load on first snapshot
-        # This prevents UI freeze when enabling snapshot mode
-        
-        # Start background threads
-        self.capture_thread = threading.Thread(target=self._capture_scheduler, daemon=True)
-        self.capture_thread.start()
-        
-        self.process_thread = threading.Thread(target=self._process_worker, daemon=True)
-        self.process_thread.start()
+        # Start threads in background (daemon mode so they don't block shutdown)
+        try:
+            self.capture_thread = threading.Thread(target=self._capture_scheduler, daemon=True, name="SnapshotCapture")
+            self.capture_thread.start()
+            
+            self.process_thread = threading.Thread(target=self._process_worker, daemon=True, name="SnapshotProcess")
+            self.process_thread.start()
+            
+            self.device_info = "Threads started"
+        except Exception as e:
+            self.error_message = f"Thread error: {str(e)[:30]}"
+            self.is_recording = False
     
     def _capture_scheduler(self) -> None:
         """Background thread: schedule and capture images."""
@@ -148,99 +155,117 @@ class SnapshotRea(BaseRea):
         
         while self.is_recording:
             try:
-                # Check if it's time for a snapshot
-                now = datetime.now()
-                if now >= self.next_snapshot_time and not self.is_processing:
-                    # Capture image
-                    try:
-                        cap = cv2.VideoCapture(0)
-                        if cap.isOpened():
-                            ret, frame = cap.read()
-                            cap.release()
-                            
-                            if ret and frame is not None:
-                                self.image_queue.put(frame)
-                                self.is_processing = True
-                                self.snapshot_count += 1
-                                self.device_info = f"Captured snapshot #{self.snapshot_count}, processing..."
-                            else:
-                                self.error_message = "Failed to capture frame"
-                        else:
-                            self.error_message = "Camera not available"
-                    except Exception as e:
-                        self.error_message = f"Capture error: {str(e)[:20]}"
-                    
-                    # Schedule next snapshot
-                    self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
-                
-                # Update countdown
+                # Update countdown timer
                 if self.next_snapshot_time:
                     delta = self.next_snapshot_time - datetime.now()
                     self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
                 
-                time.sleep(1)  # Check every second
+                # Check if it's time for a snapshot (and not already processing)
+                now = datetime.now()
+                if now >= self.next_snapshot_time and not self.is_processing:
+                    try:
+                        # Open camera
+                        cap = cv2.VideoCapture(0)
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffering
+                        
+                        if not cap.isOpened():
+                            self.error_message = "Camera unavailable"
+                        else:
+                            ret, frame = cap.read()
+                            cap.release()
+                            
+                            if ret and frame is not None and frame.size > 0:
+                                self.image_queue.put(frame)
+                                self.is_processing = True
+                                self.snapshot_count += 1
+                                self.device_info = f"Snapshot #{self.snapshot_count} captured"
+                            else:
+                                self.error_message = "Failed to read frame"
+                        
+                        # Schedule next snapshot
+                        self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
+                    
+                    except Exception as e:
+                        self.error_message = f"Capture: {str(e)[:25]}"
+                
+                time.sleep(1)
+                
             except Exception as e:
-                self.error_message = f"Scheduler error: {str(e)[:20]}"
+                self.error_message = f"Scheduler: {str(e)[:25]}"
+                time.sleep(1)
     
     def _process_worker(self) -> None:
         """Background thread: process images with vision model."""
         try:
             from PIL import Image
             import torch
+            import cv2
         except ImportError as e:
-            self.error_message = f"Missing: {str(e)[:20]}"
+            self.error_message = f"Missing import: {str(e)[:20]}"
             return
         
         while self.is_recording or not self.image_queue.empty():
             try:
                 # Get image with timeout
-                image_frame = self.image_queue.get(timeout=1)
-            except queue.Empty:
-                continue
-            
-            try:
-                # Lazy-load model on first use (not on startup)
+                try:
+                    image_frame = self.image_queue.get(timeout=2)
+                except queue.Empty:
+                    continue
+                
+                # Lazy-load model on first use
                 if self.vision_model is None:
+                    self.device_info = "Loading model..."
                     self._load_model()
                     if self.vision_model is None:
-                        self.error_message = "Failed to load model"
+                        self.device_info = "Model load failed"
                         continue
                 
-                # Convert OpenCV frame (BGR numpy array) to PIL Image (RGB)
-                import cv2
-                rgb_frame = cv2.cvtColor(image_frame, cv2.COLOR_BGR2RGB)
-                pil_image = Image.fromarray(rgb_frame)
-                
-                # Process image with vision model
-                prompt = self.ethnographic_prompt
-                inputs = self.processor(
-                    text=prompt,
-                    images=pil_image,
-                    return_tensors="pt"
-                )
+                # Convert frame
+                try:
+                    rgb_frame = cv2.cvtColor(image_frame, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(rgb_frame)
+                except Exception as e:
+                    self.error_message = f"Frame convert: {str(e)[:20]}"
+                    self.is_processing = False
+                    continue
                 
                 # Generate description
-                with torch.no_grad():
-                    output = self.vision_model.generate(
-                        **inputs,
-                        max_new_tokens=300,
-                        temperature=0.7
+                try:
+                    prompt = self.ethnographic_prompt
+                    inputs = self.processor(
+                        text=prompt,
+                        images=pil_image,
+                        return_tensors="pt"
                     )
-                
-                description = self.processor.decode(output[0], skip_special_tokens=True)
-                # Extract just the generated text (after prompt)
-                if "Assistant:" in description:
-                    description = description.split("Assistant:")[-1].strip()
-                
-                # Save to file with timestamp
-                self.last_description = description
-                self.save_entry(description)
-                self.device_info = f"Processed {self.snapshot_count} snapshots"
+                    
+                    with torch.no_grad():
+                        output = self.vision_model.generate(
+                            **inputs,
+                            max_new_tokens=300,
+                            temperature=0.7
+                        )
+                    
+                    description = self.processor.decode(output[0], skip_special_tokens=True)
+                    if "Assistant:" in description:
+                        description = description.split("Assistant:")[-1].strip()
+                    
+                    # Save to file
+                    self.last_description = description[:100]  # Store first 100 chars
+                    self.save_entry(description)
+                    self.device_info = f"Snapshot #{self.snapshot_count} saved"
+                    
+                except Exception as e:
+                    self.error_message = f"Generation: {str(e)[:30]}"
+                    self.device_info = "Error during generation"
                 
             except Exception as e:
-                self.error_message = f"Process error: {str(e)[:30]}"
+                self.error_message = f"Worker error: {str(e)[:30]}"
+            
             finally:
                 self.is_processing = False
+        
+        # Clean shutdown
+        self.device_info = "Worker stopped"
     
     def end_session(self) -> None:
         """End snapshot session."""
