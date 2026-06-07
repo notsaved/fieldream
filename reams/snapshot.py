@@ -228,21 +228,15 @@ class SnapshotRea(BaseRea):
                 self.content += entry
                 return
             
-            # Generate caption (BLIP works best with short conditional prompts)
-            # Using a simple ethnographic prompt as conditional input
-            conditional_text = "An ethnographic image showing:"
+            # Generate caption (BLIP works best without conditional text)
+            # Just let it generate the most detailed description
             inputs = processor(
                 image, 
-                text=conditional_text,
                 return_tensors="pt"
             ).to(device)
             
-            out = model.generate(**inputs, max_length=80)
+            out = model.generate(**inputs, max_length=100)
             description = processor.decode(out[0], skip_special_tokens=True)
-            
-            # Clean up the output (remove the conditional text if it's included)
-            if description.startswith(conditional_text):
-                description = description[len(conditional_text):].strip()
             
             # Create formatted entry for snapshot notes
             timestamp = datetime.now().strftime("%H:%M:%S")
