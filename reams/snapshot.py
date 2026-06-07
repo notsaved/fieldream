@@ -62,6 +62,30 @@ class SnapshotRea(BaseRea):
         except:
             return "Describe this scene in detail."
     
+    def _load_model(self) -> None:
+        """Lazy-load the LLaVA model (called from worker thread, not UI thread)."""
+        if self.vision_model is not None:
+            return  # Already loaded
+        
+        try:
+            from transformers import AutoProcessor, LlavaForConditionalGeneration
+            import torch
+            
+            model_name = "llava-hf/llava-1.5-7b-hf"
+            self.device_info = "Loading model (first snapshot only)..."
+            
+            self.processor = AutoProcessor.from_pretrained(model_name)
+            self.vision_model = LlavaForConditionalGeneration.from_pretrained(
+                model_name,
+                device_map="cpu",
+                load_in_8bit=True,
+                torch_dtype=torch.float32
+            )
+            self.device_info = "Model loaded"
+        except Exception as e:
+            self.error_message = f"Model load failed: {str(e)[:40]}"
+            self.vision_model = None
+    
     def set_interval(self, direction: str) -> None:
         """Change snapshot interval.
         
@@ -93,7 +117,7 @@ class SnapshotRea(BaseRea):
         self.is_recording = True
         self.snapshot_count = 0
         self.error_message = ""
-        self.device_info = ""
+        self.device_info = "Ready (model loads on first snapshot)"
         self.is_processing = False
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
         
@@ -104,28 +128,8 @@ class SnapshotRea(BaseRea):
             self.is_recording = False
             return
         
-        try:
-            from transformers import AutoProcessor, LlavaForConditionalGeneration
-        except ImportError as e:
-            self.error_message = f"Missing: transformers or accelerate"
-            self.is_recording = False
-            return
-        
-        # Load model
-        try:
-            model_name = "llava-hf/llava-1.5-7b-hf"  # Using 7B instead of 8B for Pi compatibility
-            self.processor = AutoProcessor.from_pretrained(model_name)
-            self.vision_model = LlavaForConditionalGeneration.from_pretrained(
-                model_name,
-                device_map="cpu",
-                load_in_8bit=True,  # Quantized for Pi
-                torch_dtype="float16" if False else "float32"  # CPU uses float32
-            )
-            self.device_info = f"Model: LLaVA-7B (int8) loaded"
-        except Exception as e:
-            self.error_message = f"Model load error: {str(e)[:30]}"
-            self.is_recording = False
-            return
+        # Don't load model yet - will lazy-load on first snapshot
+        # This prevents UI freeze when enabling snapshot mode
         
         # Start background threads
         self.capture_thread = threading.Thread(target=self._capture_scheduler, daemon=True)
@@ -139,13 +143,14 @@ class SnapshotRea(BaseRea):
         try:
             import cv2
         except ImportError:
+            self.error_message = "OpenCV not available"
             return
         
         while self.is_recording:
             try:
                 # Check if it's time for a snapshot
                 now = datetime.now()
-                if now >= self.next_snapshot_time:
+                if now >= self.next_snapshot_time and not self.is_processing:
                     # Capture image
                     try:
                         cap = cv2.VideoCapture(0)
@@ -157,6 +162,9 @@ class SnapshotRea(BaseRea):
                                 self.image_queue.put(frame)
                                 self.is_processing = True
                                 self.snapshot_count += 1
+                                self.device_info = f"Captured snapshot #{self.snapshot_count}, processing..."
+                            else:
+                                self.error_message = "Failed to capture frame"
                         else:
                             self.error_message = "Camera not available"
                     except Exception as e:
@@ -171,15 +179,11 @@ class SnapshotRea(BaseRea):
                     self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
                 
                 time.sleep(1)  # Check every second
-            except:
-                pass
+            except Exception as e:
+                self.error_message = f"Scheduler error: {str(e)[:20]}"
     
     def _process_worker(self) -> None:
         """Background thread: process images with vision model."""
-        if self.vision_model is None or self.processor is None:
-            self.error_message = "Model not loaded"
-            return
-        
         try:
             from PIL import Image
             import torch
@@ -195,6 +199,13 @@ class SnapshotRea(BaseRea):
                 continue
             
             try:
+                # Lazy-load model on first use (not on startup)
+                if self.vision_model is None:
+                    self._load_model()
+                    if self.vision_model is None:
+                        self.error_message = "Failed to load model"
+                        continue
+                
                 # Convert OpenCV frame (BGR numpy array) to PIL Image (RGB)
                 import cv2
                 rgb_frame = cv2.cvtColor(image_frame, cv2.COLOR_BGR2RGB)
@@ -224,6 +235,7 @@ class SnapshotRea(BaseRea):
                 # Save to file with timestamp
                 self.last_description = description
                 self.save_entry(description)
+                self.device_info = f"Processed {self.snapshot_count} snapshots"
                 
             except Exception as e:
                 self.error_message = f"Process error: {str(e)[:30]}"
