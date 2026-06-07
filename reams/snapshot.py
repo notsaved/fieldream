@@ -139,10 +139,23 @@ class SnapshotRea(BaseRea):
                 self.error_message = "No session folder"
                 return None
             
+            # Try to find available camera
+            camera_index = None
+            for i in range(0, 5):  # Try /dev/video0 through /dev/video4
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    camera_index = i
+                    cap.release()
+                    break
+            
+            if camera_index is None:
+                self.error_message = "No camera found (try libcamera)"
+                return None
+            
             # Open camera
-            cap = cv2.VideoCapture(0)
+            cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():
-                self.error_message = "Camera failed"
+                self.error_message = f"Camera {camera_index} failed to open"
                 return None
             
             # Read frame
@@ -160,7 +173,7 @@ class SnapshotRea(BaseRea):
             
             cv2.imwrite(str(filepath), frame)
             self.snapshot_count += 1
-            self.device_info = f"Captured #{self.snapshot_count}"
+            self.device_info = f"Captured #{self.snapshot_count} (cam{camera_index})"
             self.error_message = ""
             return str(filepath)
         
