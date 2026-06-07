@@ -201,36 +201,27 @@ class SnapshotRea(BaseRea):
                 time.sleep(1)
     
     def _generate_description(self, image_path: str) -> None:
-        """Generate description using LLaVA model."""
+        """Generate description using BLIP image captioning model."""
         try:
-            from transformers import AutoProcessor, LlavaForConditionalGeneration
+            from transformers import BlipProcessor, BlipForConditionalGeneration
             from PIL import Image
+            import torch
             
             # Load image
             image = Image.open(image_path)
             
-            # Try to load model from cache only (don't download)
-            try:
-                processor = AutoProcessor.from_pretrained(
-                    "llava-hf/llava-1.5-7b-hf",
-                    local_files_only=True
-                )
-                model = LlavaForConditionalGeneration.from_pretrained(
-                    "llava-hf/llava-1.5-7b-hf",
-                    device_map="auto",
-                    local_files_only=True
-                )
-            except Exception as e:
-                self.error_message = "LLaVA model not cached - download first"
-                return
+            # Load BLIP processor and model (cached from setup_blip.sh)
+            processor = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-base')
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = BlipForConditionalGeneration.from_pretrained(
+                'Salesforce/blip-image-captioning-base',
+                device_map=device
+            )
             
-            # Generate prompt
-            prompt = "Describe what you see in this image in one sentence."
-            inputs = processor(text=prompt, images=image, return_tensors="pt")
-            
-            # Generate description
-            output = model.generate(**inputs, max_new_tokens=50)
-            description = processor.decode(output[0], skip_special_tokens=True)
+            # Generate caption
+            inputs = processor(image, return_tensors="pt").to(device)
+            out = model.generate(**inputs, max_length=50)
+            caption = processor.decode(out[0], skip_special_tokens=True)
             
             # Save description as JSON metadata
             image_base = Path(image_path).stem
@@ -239,13 +230,14 @@ class SnapshotRea(BaseRea):
             metadata = {
                 "timestamp": datetime.now().isoformat(),
                 "image_file": Path(image_path).name,
-                "description": description
+                "description": caption
             }
             
             with open(json_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             
             self.device_info = f"Captured #{self.snapshot_count}, described"
+            self.error_message = ""
         
         except Exception as e:
-            self.error_message = f"Describe: {str(e)[:15]}"
+            self.error_message = f"Describe: {str(e)[:20]}"
