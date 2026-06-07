@@ -8,7 +8,6 @@ from pathlib import Path
 
 from reams.base import BaseRea
 from utils.file_handler import FileHandler
-import config
 
 
 class SnapshotRea(BaseRea):
@@ -200,7 +199,7 @@ class SnapshotRea(BaseRea):
                 time.sleep(1)
     
     def _generate_description(self, image_path: str) -> None:
-        """Generate ethnographic description using BLIP image captioning."""
+        """Generate ethnographic description using BLIP image captioning (offline only)."""
         try:
             from transformers import BlipProcessor, BlipForConditionalGeneration
             from PIL import Image
@@ -209,35 +208,52 @@ class SnapshotRea(BaseRea):
             # Load image
             image = Image.open(image_path)
             
-            # Load BLIP processor and model
-            processor = BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-base')
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = BlipForConditionalGeneration.from_pretrained(
-                'Salesforce/blip-image-captioning-base',
-                device_map=device
-            )
+            # Load BLIP processor and model from cache ONLY (no downloads)
+            try:
+                processor = BlipProcessor.from_pretrained(
+                    'Salesforce/blip-image-captioning-base',
+                    local_files_only=True  # CRITICAL: offline mode
+                )
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = BlipForConditionalGeneration.from_pretrained(
+                    'Salesforce/blip-image-captioning-base',
+                    device_map=device,
+                    local_files_only=True  # CRITICAL: offline mode
+                )
+            except Exception as e:
+                self.error_message = f"Model not cached: {str(e)[:15]}"
+                # Save error to file
+                entry = f"\n**{datetime.now().strftime('%H:%M:%S')}** - {Path(image_path).name}\n[Model not cached. Run setup_blip.sh first]\n"
+                self.save_entry(entry)
+                self.content += entry
+                return
             
-            # Generate ethnographic caption using config prompt
+            # Generate caption (BLIP works best with short conditional prompts)
+            # Using a simple ethnographic prompt as conditional input
+            conditional_text = "An ethnographic image showing:"
             inputs = processor(
                 image, 
-                text=config.ETHNOGRAPHIC_IMAGE_PROMPT,
+                text=conditional_text,
                 return_tensors="pt"
             ).to(device)
-            out = model.generate(**inputs, max_length=150)
+            
+            out = model.generate(**inputs, max_length=80)
             description = processor.decode(out[0], skip_special_tokens=True)
+            
+            # Clean up the output (remove the conditional text if it's included)
+            if description.startswith(conditional_text):
+                description = description[len(conditional_text):].strip()
             
             # Create formatted entry for snapshot notes
             timestamp = datetime.now().strftime("%H:%M:%S")
             filename = Path(image_path).name
             entry = f"\n**{timestamp}** - {filename}\n{description}\n"
             
-            # Save to snapshot notes using BaseRea.save_entry()
+            # Save to snapshot notes
             self.save_entry(entry)
-            
-            # Update in-memory content for display
             self.content += entry
             
-            # Save image metadata JSON
+            # Also save image metadata JSON
             image_base = Path(image_path).stem
             json_path = Path(image_path).parent / f"{image_base}.json"
             metadata = {
@@ -253,3 +269,9 @@ class SnapshotRea(BaseRea):
         
         except Exception as e:
             self.error_message = f"Describe: {str(e)[:20]}"
+            # Log error to file for debugging
+            try:
+                entry = f"\n**{datetime.now().strftime('%H:%M:%S')}** - {Path(image_path).name}\n[Error: {self.error_message}]\n"
+                self.save_entry(entry)
+            except:
+                pass
