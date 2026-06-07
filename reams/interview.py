@@ -29,6 +29,8 @@ class InterviewRea(BaseRea):
         self.last_transcription = ""
         self.chunks_being_processed = 0  # Counter for chunks in processing
         self.transcription_status = "[silence]"  # [silence], [voice], [processing], [done]
+        self.last_chunk_start_time = 0  # Timestamp when processing started
+        self.last_chunk_duration = 0.0  # Duration of last processed chunk in seconds
     
     def start_session(self) -> None:
         """Start a new interview session (audio capture)."""
@@ -40,6 +42,8 @@ class InterviewRea(BaseRea):
         self.last_transcription = ""
         self.chunks_being_processed = 0
         self.transcription_status = "[silence]"
+        self.last_chunk_start_time = 0
+        self.last_chunk_duration = 0.0
         
         try:
             import sounddevice as sd
@@ -206,6 +210,7 @@ class InterviewRea(BaseRea):
             import soundfile as sf
             import tempfile
             import os
+            import time
         except ImportError as e:
             self.error_message = f"Missing: {str(e)[:20]}"
             return
@@ -232,6 +237,7 @@ class InterviewRea(BaseRea):
                 # Set status to processing and increment chunk counter
                 self.transcription_status = "[processing]"
                 self.chunks_being_processed += 1
+                self.last_chunk_start_time = time.time()
                 
                 # Boost quiet audio (RMS around 0.06 is too quiet for Whisper)
                 # Target RMS of about 0.15-0.2 for good transcription
@@ -268,13 +274,15 @@ class InterviewRea(BaseRea):
                                 self.save_entry(text)
                                 self.last_transcription = text
                                 self.transcription_status = "[done]"
+                                self.last_chunk_duration = time.time() - self.last_chunk_start_time
                                 self.chunks_being_processed = max(0, self.chunks_being_processed - 1)
                                 text_found = True
                                 break
                     
                     if not text_found:
                         self.last_transcription = f"[waiting...]"
-                        self.transcription_status = "[silence]"
+                        self.transcription_status = "[waiting]"
+                        self.last_chunk_duration = time.time() - self.last_chunk_start_time
                         self.chunks_being_processed = max(0, self.chunks_being_processed - 1)
                 finally:
                     # Clean up temp file

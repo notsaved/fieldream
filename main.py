@@ -18,6 +18,14 @@ except ImportError:
     HAS_INTERVIEW = False
     InterviewRea = None
 
+# Try to import snapshot, but don't fail if vision libs missing
+try:
+    from reams.snapshot import SnapshotRea
+    HAS_SNAPSHOT = True
+except ImportError:
+    HAS_SNAPSHOT = False
+    SnapshotRea = None
+
 
 class Fieldream:
     """Main application class for Fieldream."""
@@ -40,9 +48,6 @@ class Fieldream:
         self.reams = {}
         self.active_reams = {"observation"}  # Observation always active
         self.input_text = ""  # Current input in observation ream
-        
-        # Column navigation
-        self.selected_column = "observation"  # Currently selected column
         
         # Scrolling
         self.scroll_offsets = {}  # Track scroll position for each ream
@@ -80,6 +85,10 @@ class Fieldream:
             # Add interview if available
             if HAS_INTERVIEW and InterviewRea:
                 self.reams["interview"] = InterviewRea(self.file_handler)
+            
+            # Add snapshot if available
+            if HAS_SNAPSHOT and SnapshotRea:
+                self.reams["snapshot"] = SnapshotRea(self.file_handler)
             
             # Initialize scroll offsets
             self.scroll_offsets = {key: 0 for key in self.reams.keys()}
@@ -212,18 +221,23 @@ class Fieldream:
             self.get_ream_statuses(),
             ream_contents=ream_contents,
             input_text=self.input_text,
-            scroll_offsets=self.scroll_offsets,
-            selected_column=self.selected_column
+            scroll_offsets=self.scroll_offsets
         )
         
         # Footer text shows keyboard shortcuts
-        footer_text = "↑↓: Scroll | Ctrl+I: Interview | Ctrl+S: Snapshot"
+        footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
         
         # Prepare status bar data
         volume = 0
         transcription_status = ""
-        chunks_processed = 0
+        queue_size = 0
+        processing_time = 0.0
         interview_active = False
+        
+        # Snapshot status
+        snapshot_interval = 0
+        snapshot_countdown = 0
+        snapshot_active = False
         
         if "interview" in self.active_reams and "interview" in self.reams:
             ream = self.reams["interview"]
@@ -234,7 +248,14 @@ class Fieldream:
             else:
                 volume = ream.get_current_volume()
                 transcription_status = ream.transcription_status
-                chunks_processed = ream.chunks_being_processed
+                queue_size = ream.audio_queue.qsize()
+                processing_time = ream.last_chunk_duration
+        
+        if "snapshot" in self.active_reams and "snapshot" in self.reams:
+            ream = self.reams["snapshot"]
+            snapshot_active = True
+            snapshot_interval = ream.get_current_interval()
+            snapshot_countdown = ream.minutes_until_next
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(
@@ -242,7 +263,11 @@ class Fieldream:
             volume=volume,
             transcription_status=transcription_status,
             interview_active=interview_active,
-            chunks_processed=chunks_processed
+            queue_size=queue_size,
+            processing_time=processing_time,
+            snapshot_active=snapshot_active,
+            snapshot_interval=snapshot_interval,
+            snapshot_countdown=snapshot_countdown
         )
         self.window_manager.refresh_all()
 
@@ -272,30 +297,6 @@ class Fieldream:
                     # Status bar updated in draw_dashboard()
                     continue
                 
-                # Handle column navigation and scrolling
-                if ch == curses.KEY_LEFT:
-                    # Select previous column
-                    columns = ["observation", "interview", "snapshot"]
-                    current_idx = columns.index(self.selected_column)
-                    self.selected_column = columns[(current_idx - 1) % 3]
-                    continue
-                elif ch == curses.KEY_RIGHT:
-                    # Select next column
-                    columns = ["observation", "interview", "snapshot"]
-                    current_idx = columns.index(self.selected_column)
-                    self.selected_column = columns[(current_idx + 1) % 3]
-                    continue
-                elif ch == curses.KEY_UP:
-                    # Scroll selected column up
-                    if self.selected_column in self.scroll_offsets:
-                        self.scroll_offsets[self.selected_column] = max(0, self.scroll_offsets[self.selected_column] - 3)
-                    continue
-                elif ch == curses.KEY_DOWN:
-                    # Scroll selected column down
-                    if self.selected_column in self.scroll_offsets:
-                        self.scroll_offsets[self.selected_column] += 3
-                    continue
-                
                 # Handle ream shortcuts
                 if ch == 9:  # Ctrl+I - Toggle Interview
                     self.toggle_ream("interview")
@@ -303,19 +304,30 @@ class Fieldream:
                 elif ch == 19:  # Ctrl+S - Toggle Snapshot
                     self.toggle_ream("snapshot")
                     continue
+                elif ch == 16:  # Ctrl+P - Manual snapshot trigger
+                    if "snapshot" in self.reams and "snapshot" in self.active_reams:
+                        self.reams["snapshot"].trigger_manual_snapshot()
+                    continue
                 elif ch == 17:  # Ctrl+Q - Quit
                     self.running = False
                     continue
+                elif ch == curses.KEY_UP:  # Up arrow - Increase snapshot interval
+                    if "snapshot" in self.reams and "snapshot" in self.active_reams:
+                        self.reams["snapshot"].set_interval("up")
+                    continue
+                elif ch == curses.KEY_DOWN:  # Down arrow - Decrease snapshot interval
+                    if "snapshot" in self.reams and "snapshot" in self.active_reams:
+                        self.reams["snapshot"].set_interval("down")
+                    continue
                 
-                # Observation is always active - handle text input only when selected
-                if self.selected_column == "observation":
-                    if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
-                        self.save_active_entry()
-                    elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
-                        if self.input_text:
-                            self.input_text = self.input_text[:-1]
-                    elif 32 <= ch <= 126:  # Printable characters
-                        self.input_text += chr(ch)
+                # Observation is always active - handle text input
+                if ch == curses.KEY_ENTER or ch == ord('\n'):  # Enter - Save
+                    self.save_active_entry()
+                elif ch == curses.KEY_BACKSPACE or ch == 127:  # Backspace
+                    if self.input_text:
+                        self.input_text = self.input_text[:-1]
+                elif 32 <= ch <= 126:  # Printable characters
+                    self.input_text += chr(ch)
                 
             except Exception as e:
                 self.status_message = f"Error: {str(e)[:40]}"

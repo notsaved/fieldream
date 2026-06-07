@@ -55,15 +55,19 @@ class WindowManager:
         except:
             pass
 
-    def draw_status(self, input_text: str = "", volume: float = 0, transcription_status: str = "", interview_active: bool = False, chunks_processed: int = 0) -> None:
+    def draw_status(self, input_text: str = "", volume: float = 0, transcription_status: str = "", interview_active: bool = False, queue_size: int = 0, processing_time: float = 0.0, snapshot_active: bool = False, snapshot_interval: int = 0, snapshot_countdown: int = 0) -> None:
         """Draw consolidated status bar at bottom.
         
         Args:
             input_text: Current input text for word/char count
             volume: Current audio volume (0-1)
-            transcription_status: Status message from Interview ([silence], [voice], [processing], [done])
+            transcription_status: Status message from Interview
             interview_active: Whether Interview ream is active
-            chunks_processed: Number of chunks currently being processed
+            queue_size: Number of chunks waiting in queue
+            processing_time: Duration of last processed chunk in seconds
+            snapshot_active: Whether Snapshot ream is active
+            snapshot_interval: Current snapshot interval in minutes
+            snapshot_countdown: Minutes until next snapshot
         """
         try:
             status_y = self.height - 1
@@ -89,9 +93,15 @@ class WindowManager:
             # Always show meter and status
             status_parts.append(f" | [{meter}] {db:+.0f}dB | {transcription_status}")
             
-            # Add chunk count if processing
-            if chunks_processed > 0:
-                status_parts.append(f" ({chunks_processed})")
+            # Add queue size and processing time if Interview active
+            if interview_active:
+                status_parts.append(f" Q:{queue_size}")
+                if processing_time > 0:
+                    status_parts.append(f" {processing_time:.1f}s")
+            
+            # Add snapshot info if active
+            if snapshot_active:
+                status_parts.append(f" | 📷 {snapshot_interval}m/~{snapshot_countdown}m")
             
             status_text = "".join(status_parts)
             status_text = status_text[:self.width-1]
@@ -107,7 +117,7 @@ class WindowManager:
             pass
 
     def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
-                       input_text: str = "", scroll_offsets: Dict[str, int] = None, selected_column: str = "observation") -> None:
+                       input_text: str = "", scroll_offsets: Dict[str, int] = None) -> None:
         """Draw the dashboard."""
         if ream_contents is None:
             ream_contents = {}
@@ -140,14 +150,12 @@ class WindowManager:
                 col_x = col_idx * (col_width + 2)
                 key = ream.get("key")
                 is_active = ream.get("active", False)
-                is_selected = (key == selected_column)
                 
-                # Column header - bold only if selected
+                # Column header
                 status_char = "*" if is_active else " "
                 header = f"[{status_char}] {ream['name']}"[:col_width]
                 color = curses.color_pair(4) if is_active else curses.color_pair(5)
-                attr = curses.A_BOLD if is_selected else 0
-                self.stdscr.addstr(row, col_x, header, color | attr)
+                self.stdscr.addstr(row, col_x, header, color | curses.A_BOLD)
                 
                 # Calculate input display lines first (only for Observation)
                 input_display_lines = []
@@ -179,15 +187,15 @@ class WindowManager:
                         line = line[col_width:]
                     wrapped_lines.append(line)
                 
-                # Calculate max scroll offset
+                # Auto-scroll to bottom if content grew
                 total_wrapped = len(wrapped_lines)
-                max_offset = max(0, total_wrapped - display_height)
+                if total_wrapped > display_height:
+                    # Show the last display_height lines
+                    offset = total_wrapped - display_height
+                else:
+                    offset = 0
                 
-                # Get current scroll offset from user input, clamped to valid range
-                current_offset = scroll_offsets.get(key, 0)
-                offset = min(current_offset, max_offset)
-                
-                # Display wrapped content lines (from offset onwards, up to max_content_row)
+                # Display wrapped content lines (from row+1 onwards, up to max_content_row)
                 display_row = 0
                 for i in range(offset, len(wrapped_lines)):
                     current_row = row + 1 + display_row
