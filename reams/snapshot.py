@@ -39,6 +39,7 @@ class SnapshotRea(BaseRea):
         self.describe_thread = None
         self.pending_images = []
         self.describe_lock = threading.Lock()
+        self.manual_trigger_pending = False  # Flag for manual captures to bypass interval
     
     def get_help_text(self) -> str:
         """Get help text for snapshot ream."""
@@ -69,7 +70,7 @@ class SnapshotRea(BaseRea):
     def trigger_manual_snapshot(self) -> None:
         """Manually trigger a snapshot immediately."""
         if self.is_recording:
-            self.next_snapshot_time = datetime.now()
+            self.manual_trigger_pending = True
     
     def start_session(self) -> None:
         """Start snapshot session."""
@@ -100,6 +101,7 @@ class SnapshotRea(BaseRea):
     def end_session(self) -> None:
         """End the session."""
         self.is_recording = False
+        self.manual_trigger_pending = False
         try:
             super().end_session()
         except:
@@ -114,14 +116,21 @@ class SnapshotRea(BaseRea):
                     delta = self.next_snapshot_time - datetime.now()
                     self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
                 
-                # Check if time for snapshot
-                if datetime.now() >= self.next_snapshot_time:
+                # Check for manual trigger (no cooldown) or scheduled time
+                should_capture = (
+                    self.manual_trigger_pending or
+                    (datetime.now() >= self.next_snapshot_time)
+                )
+                
+                if should_capture:
                     filepath = self._do_capture()
                     if filepath:
                         # Queue image for description
                         with self.describe_lock:
                             self.pending_images.append(filepath)
+                    # Reset both timers
                     self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
+                    self.manual_trigger_pending = False
                 
                 time.sleep(1)
             except:
