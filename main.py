@@ -141,46 +141,24 @@ class Fieldream:
         Args:
             ream_key: The ream key to toggle
         """
-        from debug import log
-        log(f"toggle_ream: called with {ream_key}")
-        
         if ream_key == "observation":
-            log("toggle_ream: observation always active")
             return  # Observation is always active
         
         if ream_key in self.active_reams:
             # Deactivate
-            log(f"toggle_ream: deactivating {ream_key}")
             self.active_reams.remove(ream_key)
             if ream_key in self.reams and self.reams[ream_key].session_started:
-                try:
-                    log(f"toggle_ream: calling end_session for {ream_key}")
-                    self.reams[ream_key].end_session()
-                    log(f"toggle_ream: end_session done for {ream_key}")
-                except Exception as e:
-                    log(f"toggle_ream: error ending session: {e}")
+                self.reams[ream_key].end_session()
             self.status_message = f"Deactivated {ream_key}"
-            log(f"toggle_ream: {ream_key} deactivated")
         else:
             # Activate
-            log(f"toggle_ream: activating {ream_key}")
             if ream_key in self.reams:
                 self.active_reams.add(ream_key)
-                log(f"toggle_ream: added {ream_key} to active_reams")
                 if not self.reams[ream_key].session_started:
-                    try:
-                        log(f"toggle_ream: calling start_session for {ream_key}")
-                        self.reams[ream_key].start_session()
-                        log(f"toggle_ream: start_session done for {ream_key}")
-                    except Exception as e:
-                        log(f"toggle_ream: error starting session: {e}")
-                        self.status_message = f"Error: {str(e)[:30]}"
+                    self.reams[ream_key].start_session()
                 self.status_message = f"Activated {ream_key}"
-                log(f"toggle_ream: {ream_key} activated")
             else:
                 self.status_message = f"{ream_key} ream not yet implemented"
-                log(f"toggle_ream: {ream_key} not in reams")
-        log(f"toggle_ream: finished with {ream_key}")
 
     def count_words(self, text: str) -> int:
         """Count words in text.
@@ -234,102 +212,78 @@ class Fieldream:
 
     def draw_dashboard(self) -> None:
         """Draw the dashboard view."""
-        from debug import log
-        try:
-            log("draw_dashboard: start")
-            self.window_manager.draw_header("Fieldream", "Dashboard")
-            
-            ream_contents = self.get_ream_contents()
-            log("draw_dashboard: got contents")
-            
-            self.window_manager.draw_dashboard(
-                self.session_name, 
-                self.get_ream_statuses(),
-                ream_contents=ream_contents,
-                input_text=self.input_text,
-                scroll_offsets=self.scroll_offsets
-            )
-            log("draw_dashboard: dashboard drawn")
-            
-            # Footer text shows keyboard shortcuts
-            footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
-            
-            # Prepare status bar data
-            volume = 0
-            transcription_status = ""
-            queue_size = 0
-            processing_time = 0.0
-            interview_active = False
-            
-            # Snapshot status
-            snapshot_interval = 0
-            snapshot_countdown = 0
-            snapshot_active = False
-            
-            if "interview" in self.active_reams and "interview" in self.reams:
-                ream = self.reams["interview"]
-                interview_active = True
-                # Show error if present
-                if ream.error_message:
-                    transcription_status = f"Error: {ream.error_message[:20]}"
-                else:
-                    volume = ream.get_current_volume()
-                    transcription_status = ream.transcription_status
-                    queue_size = ream.audio_queue.qsize()
-                    processing_time = ream.last_chunk_duration
-            
-            if "snapshot" in self.active_reams and "snapshot" in self.reams:
-                ream = self.reams["snapshot"]
-                snapshot_active = True
-                snapshot_interval = ream.get_current_interval()
-                snapshot_countdown = ream.minutes_until_next
-            
-            self.window_manager.draw_footer(footer_text)
-            self.window_manager.draw_status(
-                input_text=self.input_text,
-                volume=volume,
-                transcription_status=transcription_status,
-                interview_active=interview_active,
-                queue_size=queue_size,
-                processing_time=processing_time,
-                snapshot_active=snapshot_active,
-                snapshot_interval=snapshot_interval,
-                snapshot_countdown=snapshot_countdown
-            )
-            self.window_manager.refresh_all()
-            log("draw_dashboard: complete")
-        except Exception as e:
-            log(f"draw_dashboard: exception: {type(e).__name__}: {str(e)[:80]}")
-            import traceback
-            log(f"Traceback: {traceback.format_exc()[:300]}")
-            raise
+        self.window_manager.draw_header("Fieldream", "Dashboard")
+        
+        ream_contents = self.get_ream_contents()
+        
+        self.window_manager.draw_dashboard(
+            self.session_name, 
+            self.get_ream_statuses(),
+            ream_contents=ream_contents,
+            input_text=self.input_text,
+            scroll_offsets=self.scroll_offsets
+        )
+        
+        # Footer text shows keyboard shortcuts
+        footer_text = "Ctrl+I: Interview | Ctrl+S: Snapshot | Ctrl+P: Capture | ↑↓: Interval"
+        
+        # Prepare status bar data
+        volume = 0
+        transcription_status = ""
+        queue_size = 0
+        processing_time = 0.0
+        interview_active = False
+        
+        # Snapshot status
+        snapshot_interval = 0
+        snapshot_countdown = 0
+        snapshot_active = False
+        
+        if "interview" in self.active_reams and "interview" in self.reams:
+            ream = self.reams["interview"]
+            interview_active = True
+            # Show error if present
+            if ream.error_message:
+                transcription_status = f"Error: {ream.error_message[:20]}"
+            else:
+                volume = ream.get_current_volume()
+                transcription_status = ream.transcription_status
+                queue_size = ream.audio_queue.qsize()
+                processing_time = ream.last_chunk_duration
+        
+        if "snapshot" in self.active_reams and "snapshot" in self.reams:
+            ream = self.reams["snapshot"]
+            snapshot_active = True
+            snapshot_interval = ream.get_current_interval()
+            snapshot_countdown = ream.minutes_until_next
+        
+        self.window_manager.draw_footer(footer_text)
+        self.window_manager.draw_status(
+            input_text=self.input_text,
+            volume=volume,
+            transcription_status=transcription_status,
+            interview_active=interview_active,
+            queue_size=queue_size,
+            processing_time=processing_time,
+            snapshot_active=snapshot_active,
+            snapshot_interval=snapshot_interval,
+            snapshot_countdown=snapshot_countdown
+        )
+        self.window_manager.refresh_all()
 
     def run(self) -> None:
         """Main application loop."""
         import time
-        from debug import log, clear_log
-        
-        clear_log()  # Start fresh
-        log("run(): starting application")
-        
         curses.curs_set(0)  # Hide cursor by default
         
         # Initialize session
-        log("run(): calling init_session")
         if not self.init_session():
-            log("run(): init_session failed")
             self.running = False
             return
-        log("run(): init_session complete")
         
         self.stdscr.nodelay(True)  # Non-blocking input
         
-        loop_count = 0
         while self.running:
-            loop_count += 1
-            if loop_count % 20 == 0:  # Log every 20 iterations (once per second)
-                log(f"run(): loop iteration {loop_count}")
-            
             try:
                 # Add small delay to prevent rapid flashing
                 time.sleep(0.05)
@@ -340,20 +294,14 @@ class Fieldream:
                 
                 if ch == -1:
                     # No input available - continue to next frame
-                    # Status bar updated in draw_dashboard()
                     continue
                 
-                log(f"run(): key pressed: {ch}")
                 # Handle ream shortcuts
                 if ch == 9:  # Ctrl+I - Toggle Interview
-                    log("run(): Ctrl+I pressed")
                     self.toggle_ream("interview")
-                    log("run(): Ctrl+I handled")
                     continue
                 elif ch == 19:  # Ctrl+S - Toggle Snapshot
-                    log("run(): Ctrl+S pressed")
                     self.toggle_ream("snapshot")
-                    log("run(): Ctrl+S handled")
                     continue
                 elif ch == 16:  # Ctrl+P - Manual snapshot trigger
                     if "snapshot" in self.reams and "snapshot" in self.active_reams:
@@ -381,7 +329,6 @@ class Fieldream:
                     self.input_text += chr(ch)
                 
             except Exception as e:
-                log(f"run(): exception in main loop: {type(e).__name__}: {str(e)[:100]}")
                 self.status_message = f"Error: {str(e)[:40]}"
                 self.window_manager.draw_status(input_text=self.input_text)
                 self.window_manager.refresh_all()

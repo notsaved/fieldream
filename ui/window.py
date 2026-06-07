@@ -119,15 +119,12 @@ class WindowManager:
     def draw_dashboard(self, session_name: str, reams: List[Dict], ream_contents: Dict[str, str] = None, 
                        input_text: str = "", scroll_offsets: Dict[str, int] = None) -> None:
         """Draw the dashboard."""
-        from debug import log
-        
         if ream_contents is None:
             ream_contents = {}
         if scroll_offsets is None:
             scroll_offsets = {}
         
         try:
-            log("draw_dashboard: start")
             # Clear content area
             for y in range(1, self.height - 2):
                 self.stdscr.move(y, 0)
@@ -143,7 +140,6 @@ class WindowManager:
             # Draw 3 columns
             col_width = (self.width - 4) // 3
             row = 3
-            log("draw_dashboard: headers done")
             
             for col_idx, ream in enumerate(reams):
                 if col_idx >= 3:
@@ -211,6 +207,7 @@ class WindowManager:
                     display_row += 1
                 
                 # Display input lines if Observation (grows upward from height-3)
+                # Display input lines if Observation (grows upward from height-3)
                 if key == "observation" and input_display_lines:
                     input_start_row = self.height - 3 - num_input_lines
                     for idx, input_line in enumerate(input_display_lines):
@@ -220,19 +217,6 @@ class WindowManager:
                         
                         self.stdscr.addstr(current_row, col_x, input_line[:col_width], curses.color_pair(3))
             
-            log("draw_dashboard: refresh")
             self.stdscr.refresh()
-            log("draw_dashboard: done")
         except Exception as e:
-            from debug import log
-            log(f"ERROR in draw_dashboard: {type(e).__name__}: {str(e)[:100]}")
-            import traceback
-            log(f"Traceback: {traceback.format_exc()[:200]}")
-            # Try to display error on screen
-            try:
-                self.stdscr.move(5, 0)
-                error_msg = f"ERROR: {str(e)[:30]}"[:self.width-1]
-                self.stdscr.addstr(5, 0, error_msg, curses.color_pair(5))
-                self.stdscr.refresh()
-            except:
-                pass
+            pass

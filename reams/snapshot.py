@@ -1,7 +1,6 @@
-"""Snapshot ream - Image capture and vision-based description generation."""
+"""Snapshot ream - Simple webcam image capture."""
 
 import threading
-import queue
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +10,7 @@ from utils.file_handler import FileHandler
 
 
 class SnapshotRea(BaseRea):
-    """Snapshot ream for webcam image capture and vision-language description."""
+    """Snapshot ream for simple webcam image capture."""
     
     def __init__(self, file_handler: FileHandler):
         """Initialize snapshot ream.
@@ -22,10 +21,6 @@ class SnapshotRea(BaseRea):
         super().__init__(file_handler, "snapshot", "Snapshot")
         self.is_recording = False
         self.capture_thread = None
-        self.process_thread = None
-        self.image_queue = queue.Queue()
-        self.vision_model = None
-        self.processor = None
         
         # Interval management
         self.interval_options = [5, 10, 15, 20, 30]  # minutes
@@ -34,14 +29,9 @@ class SnapshotRea(BaseRea):
         
         # Status
         self.error_message = ""
-        self.last_description = ""
         self.device_info = ""
         self.minutes_until_next = 0
-        self.is_processing = False
         self.snapshot_count = 0
-        
-        # Load prompt from file
-        self.ethnographic_prompt = self._load_prompt()
     
     def get_help_text(self) -> str:
         """Get help text for snapshot ream."""
@@ -50,45 +40,6 @@ class SnapshotRea(BaseRea):
     def handle_input(self, input_data: str) -> None:
         """Handle input data (not used for snapshot)."""
         pass
-    
-    def _load_prompt(self) -> str:
-        """Load ethnographic prompt from file."""
-        try:
-            prompt_file = Path(__file__).parent.parent / "prompts" / "snapshot_prompt.txt"
-            if prompt_file.exists():
-                return prompt_file.read_text(encoding="utf-8").strip()
-            else:
-                return "Describe this scene in detail."
-        except:
-            return "Describe this scene in detail."
-    
-    def _load_model(self) -> None:
-        """Lazy-load the LLaVA model (called from worker thread, not UI thread)."""
-        if self.vision_model is not None:
-            return  # Already loaded
-        
-        try:
-            from transformers import AutoProcessor, LlavaForConditionalGeneration
-            import torch
-            
-            model_name = "llava-hf/llava-1.5-7b-hf"
-            self.device_info = "Loading processor..."
-            self.processor = AutoProcessor.from_pretrained(model_name)
-            
-            self.device_info = "Loading vision model..."
-            self.vision_model = LlavaForConditionalGeneration.from_pretrained(
-                model_name,
-                device_map="cpu",
-                load_in_8bit=True,
-                torch_dtype=torch.float32
-            )
-            self.device_info = "Model ready"
-        except ImportError as e:
-            self.error_message = f"Import error: {str(e)[:30]}"
-            self.device_info = "Failed: missing dependency"
-        except Exception as e:
-            self.error_message = f"Load failed: {str(e)[:30]}"
-            self.device_info = "Failed: load error"
     
     def set_interval(self, direction: str) -> None:
         """Change snapshot interval.
@@ -104,6 +55,9 @@ class SnapshotRea(BaseRea):
         # Reset next snapshot time with new interval
         if self.is_recording:
             self.next_snapshot_time = datetime.now() + timedelta(minutes=self.interval_options[self.current_interval_idx])
+        
+        interval = self.interval_options[self.current_interval_idx]
+        self.device_info = f"Interval: {interval}m"
     
     def get_current_interval(self) -> int:
         """Get current interval in minutes."""
@@ -111,60 +65,43 @@ class SnapshotRea(BaseRea):
     
     def trigger_manual_snapshot(self) -> None:
         """Manually trigger a snapshot immediately."""
-        if self.is_recording and not self.is_processing:
+        if self.is_recording:
             # Wake up capture thread immediately
             self.next_snapshot_time = datetime.now()
     
     def start_session(self) -> None:
         """Start a new snapshot session (webcam capture)."""
-        from debug import log
-        log("SnapshotRea.start_session: called")
-        
         super().start_session()
         self.is_recording = True
         self.snapshot_count = 0
         self.error_message = ""
-        self.device_info = "Initialized (ready to capture)"
-        self.is_processing = False
+        self.device_info = "Initialized"
         self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
-        log("SnapshotRea.start_session: base init done")
         
+        # Start capture thread (daemon mode)
         try:
-            import cv2
-        except ImportError as e:
-            log(f"SnapshotRea: OpenCV import failed: {e}")
-            self.error_message = f"Missing: opencv-python"
-            self.is_recording = False
-            return
-        
-        log("SnapshotRea.start_session: creating threads")
-        # Start threads in background (daemon mode so they don't block shutdown)
-        try:
-            self.capture_thread = threading.Thread(target=self._capture_scheduler, daemon=True, name="SnapshotCapture")
+            self.capture_thread = threading.Thread(
+                target=self._capture_loop, 
+                daemon=True, 
+                name="SnapshotCapture"
+            )
             self.capture_thread.start()
-            log("SnapshotRea.start_session: capture thread started")
-            
-            self.process_thread = threading.Thread(target=self._process_worker, daemon=True, name="SnapshotProcess")
-            self.process_thread.start()
-            log("SnapshotRea.start_session: process thread started")
-            
-            self.device_info = "Threads started"
+            self.device_info = "Ready"
         except Exception as e:
-            log(f"SnapshotRea: Thread error: {e}")
             self.error_message = f"Thread error: {str(e)[:30]}"
             self.is_recording = False
-        log("SnapshotRea.start_session: done")
     
-    def _capture_scheduler(self) -> None:
-        """Background thread: schedule and capture images."""
-        from debug import log
-        log("SnapshotRea._capture_scheduler: thread started")
-        
+    def end_session(self) -> None:
+        """End the session."""
+        super().end_session()
+        self.is_recording = False
+    
+    def _capture_loop(self) -> None:
+        """Background thread: capture images on schedule."""
         try:
             import cv2
         except ImportError:
             self.error_message = "OpenCV not available"
-            log("SnapshotRea._capture_scheduler: OpenCV import failed")
             return
         
         while self.is_recording:
@@ -174,120 +111,41 @@ class SnapshotRea(BaseRea):
                     delta = self.next_snapshot_time - datetime.now()
                     self.minutes_until_next = max(0, int(delta.total_seconds() / 60))
                 
-                # Check if it's time for a snapshot (and not already processing)
+                # Check if it's time for a snapshot
                 now = datetime.now()
-                if now >= self.next_snapshot_time and not self.is_processing:
-                    log(f"SnapshotRea._capture_scheduler: capturing snapshot")
+                if now >= self.next_snapshot_time:
                     try:
-                        # Open camera
+                        # Open camera and capture
                         cap = cv2.VideoCapture(0)
-                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffering
-                        
                         if not cap.isOpened():
-                            self.error_message = "Camera unavailable"
-                            log("SnapshotRea: Camera not opened")
+                            self.error_message = "Camera not found"
                         else:
                             ret, frame = cap.read()
                             cap.release()
                             
-                            if ret and frame is not None and frame.size > 0:
-                                self.image_queue.put(frame)
-                                self.is_processing = True
+                            if ret and frame is not None:
+                                # Save image
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                filename = f"snapshot_{timestamp}.jpg"
+                                filepath = self.file_handler.session_folder / filename
+                                
+                                cv2.imwrite(str(filepath), frame)
                                 self.snapshot_count += 1
-                                self.device_info = f"Snapshot #{self.snapshot_count} captured"
-                                log(f"SnapshotRea: Snapshot #{self.snapshot_count} queued")
+                                self.device_info = f"Snapshot #{self.snapshot_count} saved"
+                                self.error_message = ""
                             else:
                                 self.error_message = "Failed to read frame"
-                                log("SnapshotRea: Frame read failed")
                         
                         # Schedule next snapshot
-                        self.next_snapshot_time = datetime.now() + timedelta(minutes=self.get_current_interval())
-                    
-                    except Exception as e:
-                        self.error_message = f"Capture: {str(e)[:25]}"
-                        log(f"SnapshotRea._capture_scheduler error: {e}")
-                
-                time.sleep(1)
-                
-            except Exception as e:
-                self.error_message = f"Scheduler: {str(e)[:25]}"
-                log(f"SnapshotRea._capture_scheduler outer error: {e}")
-                time.sleep(1)
-    
-    def _process_worker(self) -> None:
-        """Background thread: process images with vision model."""
-        try:
-            from PIL import Image
-            import torch
-            import cv2
-        except ImportError as e:
-            self.error_message = f"Missing import: {str(e)[:20]}"
-            return
-        
-        while self.is_recording or not self.image_queue.empty():
-            try:
-                # Get image with timeout
-                try:
-                    image_frame = self.image_queue.get(timeout=2)
-                except queue.Empty:
-                    continue
-                
-                # Lazy-load model on first use
-                if self.vision_model is None:
-                    self.device_info = "Loading model..."
-                    self._load_model()
-                    if self.vision_model is None:
-                        self.device_info = "Model load failed"
-                        continue
-                
-                # Convert frame
-                try:
-                    rgb_frame = cv2.cvtColor(image_frame, cv2.COLOR_BGR2RGB)
-                    pil_image = Image.fromarray(rgb_frame)
-                except Exception as e:
-                    self.error_message = f"Frame convert: {str(e)[:20]}"
-                    self.is_processing = False
-                    continue
-                
-                # Generate description
-                try:
-                    prompt = self.ethnographic_prompt
-                    inputs = self.processor(
-                        text=prompt,
-                        images=pil_image,
-                        return_tensors="pt"
-                    )
-                    
-                    with torch.no_grad():
-                        output = self.vision_model.generate(
-                            **inputs,
-                            max_new_tokens=300,
-                            temperature=0.7
+                        self.next_snapshot_time = datetime.now() + timedelta(
+                            minutes=self.get_current_interval()
                         )
                     
-                    description = self.processor.decode(output[0], skip_special_tokens=True)
-                    if "Assistant:" in description:
-                        description = description.split("Assistant:")[-1].strip()
-                    
-                    # Save to file
-                    self.last_description = description[:100]  # Store first 100 chars
-                    self.save_entry(description)
-                    self.device_info = f"Snapshot #{self.snapshot_count} saved"
-                    
-                except Exception as e:
-                    self.error_message = f"Generation: {str(e)[:30]}"
-                    self.device_info = "Error during generation"
+                    except Exception as e:
+                        self.error_message = f"Capture error: {str(e)[:25]}"
+                
+                time.sleep(1)  # Check every second
                 
             except Exception as e:
-                self.error_message = f"Worker error: {str(e)[:30]}"
-            
-            finally:
-                self.is_processing = False
-        
-        # Clean shutdown
-        self.device_info = "Worker stopped"
-    
-    def end_session(self) -> None:
-        """End snapshot session."""
-        self.is_recording = False
-        super().end_session()
+                self.error_message = f"Thread error: {str(e)[:25]}"
+                time.sleep(1)
