@@ -106,6 +106,12 @@ class SnapshotRea(BaseRea):
         
         while self.is_recording:
             try:
+                # Check if session folder is valid
+                if not self.file_handler or not self.file_handler.session_folder:
+                    self.error_message = "Session folder not set"
+                    time.sleep(1)
+                    continue
+                
                 # Update countdown timer
                 if self.next_snapshot_time:
                     delta = self.next_snapshot_time - datetime.now()

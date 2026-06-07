@@ -147,16 +147,24 @@ class Fieldream:
         if ream_key in self.active_reams:
             # Deactivate
             self.active_reams.remove(ream_key)
-            if ream_key in self.reams and self.reams[ream_key].session_started:
-                self.reams[ream_key].end_session()
+            try:
+                if ream_key in self.reams and self.reams[ream_key].session_started:
+                    self.reams[ream_key].end_session()
+            except Exception as e:
+                self.status_message = f"Error deactivating: {str(e)[:20]}"
             self.status_message = f"Deactivated {ream_key}"
         else:
             # Activate
             if ream_key in self.reams:
                 self.active_reams.add(ream_key)
-                if not self.reams[ream_key].session_started:
-                    self.reams[ream_key].start_session()
-                self.status_message = f"Activated {ream_key}"
+                try:
+                    if not self.reams[ream_key].session_started:
+                        self.reams[ream_key].start_session()
+                    self.status_message = f"Activated {ream_key}"
+                except Exception as e:
+                    # Remove from active reams if startup failed
+                    self.active_reams.discard(ream_key)
+                    self.status_message = f"Error: {str(e)[:30]}"
             else:
                 self.status_message = f"{ream_key} ream not yet implemented"
 
@@ -240,22 +248,30 @@ class Fieldream:
         snapshot_active = False
         
         if "interview" in self.active_reams and "interview" in self.reams:
-            ream = self.reams["interview"]
-            interview_active = True
-            # Show error if present
-            if ream.error_message:
-                transcription_status = f"Error: {ream.error_message[:20]}"
-            else:
-                volume = ream.get_current_volume()
-                transcription_status = ream.transcription_status
-                queue_size = ream.audio_queue.qsize()
-                processing_time = ream.last_chunk_duration
+            try:
+                ream = self.reams["interview"]
+                interview_active = True
+                # Show error if present
+                if ream.error_message:
+                    transcription_status = f"Error: {ream.error_message[:20]}"
+                else:
+                    volume = ream.get_current_volume()
+                    transcription_status = ream.transcription_status
+                    queue_size = ream.audio_queue.qsize()
+                    processing_time = ream.last_chunk_duration
+            except Exception:
+                # Interview ream error - don't crash, just skip
+                interview_active = False
         
         if "snapshot" in self.active_reams and "snapshot" in self.reams:
-            ream = self.reams["snapshot"]
-            snapshot_active = True
-            snapshot_interval = ream.get_current_interval()
-            snapshot_countdown = ream.minutes_until_next
+            try:
+                ream = self.reams["snapshot"]
+                snapshot_active = True
+                snapshot_interval = ream.get_current_interval()
+                snapshot_countdown = ream.minutes_until_next
+            except Exception:
+                # Snapshot ream error - don't crash, just skip
+                snapshot_active = False
         
         self.window_manager.draw_footer(footer_text)
         self.window_manager.draw_status(
@@ -274,6 +290,7 @@ class Fieldream:
     def run(self) -> None:
         """Main application loop."""
         import time
+        import traceback
         curses.curs_set(0)  # Hide cursor by default
         
         # Initialize session
@@ -328,10 +345,16 @@ class Fieldream:
                 elif 32 <= ch <= 126:  # Printable characters
                     self.input_text += chr(ch)
                 
+            except KeyboardInterrupt:
+                self.running = False
             except Exception as e:
+                # Log error but continue running
                 self.status_message = f"Error: {str(e)[:40]}"
-                self.window_manager.draw_status(input_text=self.input_text)
-                self.window_manager.refresh_all()
+                try:
+                    self.window_manager.draw_status(input_text=self.input_text)
+                    self.window_manager.refresh_all()
+                except:
+                    pass
                 time.sleep(0.1)
 
 
